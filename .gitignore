@@ -35,8 +35,6 @@ go.work
 *.gen.go
 testdata/
 *.log
-*.sql
-*.sqlite
 *.db
 *.crt
 *.key
