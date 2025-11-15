@@ -1,0 +1,80 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.test
+local.env
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, coverage and profiling
+*.test
+*.out
+coverage.out
+*.prof
+*.cover
+
+# Build directories and artifacts
+bin/
+build/
+_build/
+dist/
+
+# Dependency directories
+vendor/
+
+# Go workspace
+go.work
+
+# Generated and temporary files
+*.gen.go
+testdata/
+*.log
+*.sql
+*.sqlite
+*.db
+*.crt
+*.key
+
+# Editor directories and files
+.vscode/
+.idea/
+*.iml
+.cache/
+.project
+.classpath
+.settings/
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+Icon
+._*
+.DS_Store
+._.DS_Store
+\.Spotlight-V100
+\.Trashes
+~$*
+
+# Editor swap/backup
+*~
+*.swp
+*.swo
+*_backup.*
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Misc
+.npmrc
+
+# Ignore local config used by developers
+local.yaml
+.env
