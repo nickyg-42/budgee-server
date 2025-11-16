@@ -12,10 +12,5 @@ func Connect(url string) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 
-	// Test connection
-	if err := pool.Ping(context.Background()); err != nil {
-		return nil, err
-	}
-
 	return pool, nil
 }
