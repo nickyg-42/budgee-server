@@ -1,6 +1,7 @@
 package api
 
 import (
+	"budgee-server/src/handlers"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +14,8 @@ func NewRouter(pool *pgxpool.Pool) *chi.Mux {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
+
+	r.Post("/register", handlers.Register(pool))
 
 	return r
 }
