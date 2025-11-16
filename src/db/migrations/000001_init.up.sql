@@ -5,6 +5,7 @@ CREATE TABLE users (
     email TEXT UNIQUE NOT NULL,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    super_admin BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -19,7 +20,7 @@ CREATE TABLE plaid_items (
     cursor TEXT,
     status text NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT now()
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE accounts (
@@ -34,7 +35,7 @@ CREATE TABLE accounts (
     current_balance numeric(28,10),
     available_balance numeric(28,10),
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT now()
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE transactions (
@@ -52,5 +53,5 @@ CREATE TABLE transactions (
     pending BOOLEAN NOT NULL,
     account_owner text,
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT now()
+    updated_at TIMESTAMP DEFAULT NOW()
 );

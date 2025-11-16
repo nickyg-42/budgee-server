@@ -1,9 +1,9 @@
 package handlers
 
 import (
+	db "budgee-server/src/db/sql"
 	"budgee-server/src/models"
 	"budgee-server/src/util"
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -28,18 +28,14 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Hash password
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
-		// Insert into DB
-		var userID int
-		query := `INSERT INTO users (email, username, password_hash) 
-                  VALUES ($1, $2, $3) RETURNING id`
-		err = pool.QueryRow(context.Background(), query, req.Email, req.Username, string(hashedPassword)).Scan(&userID)
+		var resp *models.RegisterResponse
+		resp, err = db.CreateUser(pool, req, string(hashedPassword))
 		if err != nil {
 			// Handle duplicate key
 			if strings.Contains(err.Error(), "duplicate key") {
@@ -48,12 +44,6 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
-		}
-
-		resp := models.RegisterResponse{
-			ID:       userID,
-			Email:    req.Email,
-			Username: req.Username,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

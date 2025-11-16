@@ -14,5 +14,13 @@ func ValidateUsername(username string) bool {
 }
 
 func ValidatePassword(password string) bool {
-	return len(password) >= 8 // enforce minimum 8 chars; can add more rules
+	if len(password) < 8 {
+		return false
+	}
+	hasLower := regexp.MustCompile("[a-z]").MatchString(password)
+	hasUpper := regexp.MustCompile("[A-Z]").MatchString(password)
+	hasDigit := regexp.MustCompile("[0-9]").MatchString(password)
+	hasSpecial := regexp.MustCompile(`[^A-Za-z0-9]`).MatchString(password)
+
+	return hasLower && hasUpper && hasDigit && hasSpecial
 }
