@@ -52,6 +52,8 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-// func Login(pool *pgxpool.Pool) http.HandlerFunc {
+func Login(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 
-// }
+	}
+}

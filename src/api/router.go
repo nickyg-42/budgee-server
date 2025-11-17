@@ -2,6 +2,7 @@ package api
 
 import (
 	"budgee-server/src/handlers"
+	"budgee-server/src/middleware"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -15,7 +16,17 @@ func NewRouter(pool *pgxpool.Pool) *chi.Mux {
 		w.Write([]byte("ok"))
 	})
 
-	r.Post("/register", handlers.Register(pool))
+	r.Use(middleware.CORSMiddleware)
+
+	r.Route("/api", func(r chi.Router) {
+		r.Post("/login", handlers.Login(pool))
+		r.Post("/register", handlers.Register(pool))
+
+		// JWT required routes
+		r.With(middleware.JWTAuthMiddleware).Group(func(r chi.Router) {
+
+		})
+	})
 
 	return r
 }
