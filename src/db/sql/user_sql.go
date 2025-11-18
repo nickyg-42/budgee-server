@@ -13,7 +13,7 @@ import (
 func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-		SELECT id, username, email, first_name, last_name, password_hash, role, created_at
+		SELECT id, username, email, first_name, last_name, password_hash, created_at
 		FROM users 
 		WHERE id = $1
 	`
@@ -36,7 +36,7 @@ func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-        SELECT id, username, email, first_name, last_name, password_hash, role, created_at
+        SELECT id, username, email, first_name, last_name, password_hash, created_at
         FROM users 
         WHERE username = $1
     `
@@ -59,7 +59,7 @@ func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error
 	return &user, nil
 }
 
-func CreateUser(pool *pgxpool.Pool, req models.RegisterRequest, hashedPassword string) (*models.RegisterResponse, error) {
+func CreateUser(req models.RegisterRequest, hashedPassword string, pool *pgxpool.Pool) (*models.RegisterResponse, error) {
 	query := `
 		INSERT INTO users (first_name, last_name, username, email, password_hash)
 		VALUES ($1, $2, $3, $4, $5)

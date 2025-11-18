@@ -5,9 +5,13 @@ import (
 	"budgee-server/src/models"
 	"budgee-server/src/util"
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,7 +39,7 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		var resp *models.RegisterResponse
-		resp, err = db.CreateUser(pool, req, string(hashedPassword))
+		resp, err = db.CreateUser(req, string(hashedPassword), pool)
 		if err != nil {
 			// Handle duplicate key
 			if strings.Contains(err.Error(), "duplicate key") {
@@ -54,6 +58,57 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 
 func Login(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		enableCors(&w)
 
+		var credentials struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
+			log.Printf("ERROR: Failed to decode login request body: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		user, err := db.GetUserByUsername(strings.ToLower(credentials.Username), pool)
+		if err != nil {
+			log.Printf("ERROR: Failed to find user during login - Username: %s: %v", credentials.Username, err)
+			http.Error(w, "User not found", http.StatusUnauthorized)
+			return
+		}
+
+		if err := bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(credentials.Password)); err != nil {
+			log.Printf("ERROR: Invalid password attempt for user %s from IP %s",
+				credentials.Username, r.RemoteAddr)
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		// Create the JWT token
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"user_id":  user.ID,
+			"username": user.Username,
+			"exp":      time.Now().Add(time.Hour * 504).Unix(),
+		})
+
+		tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+		if err != nil {
+			log.Printf("ERROR: Failed to generate JWT token for user %s: %v",
+				user.Username, err)
+			http.Error(w, "Error generating token", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: Successful login - User: %s, ID: %d", user.Username, user.ID)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"token": tokenString,
+		})
 	}
+}
+
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 }
