@@ -8,8 +8,11 @@ import (
 )
 
 type Config struct {
-	Port        string
-	DatabaseURL string
+	Port             string
+	DatabaseURL      string
+	PlaidClientID    string
+	PlaidSecret      string
+	PlaidEnvironment string
 }
 
 func Load() Config {
@@ -17,12 +20,21 @@ func Load() Config {
 	_ = godotenv.Load()
 
 	cfg := Config{
-		Port:        getEnv("PORT", "8080"),
-		DatabaseURL: getEnv("DATABASE_URL", ""),
+		Port:             getEnv("PORT", "8080"),
+		DatabaseURL:      getEnv("DATABASE_URL", ""),
+		PlaidClientID:    getEnv("PLAID_CLIENT_ID", ""),
+		PlaidSecret:      getEnv("PLAID_SECRET", ""),
+		PlaidEnvironment: getEnv("PLAID_ENVIRONMENT", "sandbox"),
 	}
 
 	if cfg.DatabaseURL == "" {
 		log.Fatal("DATABASE_URL is required")
+	}
+	if cfg.PlaidClientID == "" {
+		log.Fatal("PLAID_CLIENT_ID is required")
+	}
+	if cfg.PlaidSecret == "" {
+		log.Fatal("PLAID_SECRET is required")
 	}
 
 	return cfg

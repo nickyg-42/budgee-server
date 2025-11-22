@@ -11,14 +11,9 @@ import (
 	"github.com/plaid/plaid-go/plaid"
 )
 
-func CreateLinkToken(userID int64, pool *pgxpool.Pool) http.HandlerFunc {
+func CreateLinkToken(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		configuration := plaid.NewConfiguration()
-		configuration.AddDefaultHeader("PLAID-CLIENT-ID", "")
-		configuration.AddDefaultHeader("PLAID-SECRET", "")
-		configuration.UseEnvironment(plaid.Production)
-		plaidClient := plaid.NewAPIClient(configuration)
-
+		// get userID from params or jwt?
 		user := plaid.LinkTokenCreateRequestUser{
 			ClientUserId: strconv.FormatInt(userID, 10),
 		}
@@ -43,14 +38,9 @@ func CreateLinkToken(userID int64, pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-func ExchangePublicToken(publicToken string, pool *pgxpool.Pool) http.HandlerFunc {
+func ExchangePublicToken(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		configuration := plaid.NewConfiguration()
-		configuration.AddDefaultHeader("PLAID-CLIENT-ID", "")
-		configuration.AddDefaultHeader("PLAID-SECRET", "")
-		configuration.UseEnvironment(plaid.Production)
-		plaidClient := plaid.NewAPIClient(configuration)
-
+		// get public token from request body
 		exchangePublicTokenReq := plaid.NewItemPublicTokenExchangeRequest(publicToken)
 		exchangePublicTokenResp, _, err := plaidClient.PlaidApi.ItemPublicTokenExchange(context.Background()).ItemPublicTokenExchangeRequest(
 			*exchangePublicTokenReq,
@@ -69,14 +59,12 @@ func ExchangePublicToken(publicToken string, pool *pgxpool.Pool) http.HandlerFun
 	}
 }
 
-func GetTransactions(userID int64, pool *pgxpool.Pool) http.HandlerFunc {
+func GetTransactions(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Grab access token from db - do not pass from client
-		
-		request := plaid.NewTransactionsSyncRequest(
-  			accessToken
-		)
 
-		transactionsResp, _, err := testClient.PlaidApi.TransactionsSync(ctx).TransactionsSyncRequest(*request).Execute()
+		request := plaid.NewTransactionsSyncRequest(accessToken)
+
+		transactionsResp, _, err := plaidClient.PlaidApi.TransactionsSync(context.Background()).TransactionsSyncRequest(*request).Execute()
 	}
 }

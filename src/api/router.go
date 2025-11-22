@@ -7,9 +7,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/plaid/plaid-go/plaid"
 )
 
-func NewRouter(pool *pgxpool.Pool) *chi.Mux {
+func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +25,9 @@ func NewRouter(pool *pgxpool.Pool) *chi.Mux {
 
 		// JWT required routes
 		r.With(middleware.JWTAuthMiddleware).Group(func(r chi.Router) {
-
+			r.Post("/plaid/create-link-token", handlers.CreateLinkToken(plaidClient, pool))
+			r.Post("/plaid/exchange-public-token", handlers.ExchangePublicToken(plaidClient, pool))
+			r.Get("/plaid/transactions", handlers.GetTransactions(plaidClient, pool))
 		})
 	})
 
