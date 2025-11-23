@@ -12,12 +12,11 @@ import (
 
 func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 	r := chi.NewRouter()
+	r.Use(middleware.CORSMiddleware)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-
-	r.Use(middleware.CORSMiddleware)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/login", handlers.Login(pool))
@@ -27,7 +26,11 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 		r.With(middleware.JWTAuthMiddleware).Group(func(r chi.Router) {
 			r.Post("/plaid/create-link-token", handlers.CreateLinkToken(plaidClient, pool))
 			r.Post("/plaid/exchange-public-token", handlers.ExchangePublicToken(plaidClient, pool))
-			r.Get("/plaid/transactions", handlers.GetTransactions(plaidClient, pool))
+			r.Get("/plaid/items", handlers.GetPlaidItemsFromDB(pool))
+			r.Get("/plaid/accounts/{item_id}", handlers.GetPlaidAccounts(plaidClient, pool))
+			r.Get("/plaid/accounts/{item_id}/db", handlers.GetAccountsFromDB(pool))
+			r.Get("/plaid/transactions/{item_id}/sync", handlers.SyncTransactions(plaidClient, pool))
+			r.Get("/plaid/transactions/{account_id}", handlers.GetTransactionsFromDB(pool))
 		})
 	})
 

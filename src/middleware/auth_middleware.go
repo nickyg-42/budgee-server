@@ -46,7 +46,7 @@ func JWTAuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		username := claims["username"].(string)
-		userID := int(claims["user_id"].(float64))
+		userID := int64(claims["user_id"].(float64))
 
 		ctx := context.WithValue(r.Context(), "username", username)
 		ctx = context.WithValue(ctx, "user_id", userID)

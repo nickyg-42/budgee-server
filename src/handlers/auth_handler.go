@@ -20,6 +20,7 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.RegisterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode register request body: %v", err)
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
@@ -27,13 +28,27 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 		req.Email = strings.TrimSpace(req.Email)
 		req.Username = strings.TrimSpace(req.Username)
 
-		if !util.ValidateEmail(req.Email) || !util.ValidateUsername(req.Username) || !util.ValidatePassword(req.Password) {
-			http.Error(w, "invalid input", http.StatusBadRequest)
+		if !util.ValidateEmail(req.Email) {
+			log.Printf("ERROR: Email validation failed during registration - Email: %s", req.Email)
+			http.Error(w, "invalid email format", http.StatusBadRequest)
+			return
+		}
+
+		if !util.ValidateUsername(req.Username) {
+			log.Printf("ERROR: Username validation failed during registration - Username: %s", req.Username)
+			http.Error(w, "username must be between 3 and 30 characters", http.StatusBadRequest)
+			return
+		}
+
+		if !util.ValidatePassword(req.Password) {
+			log.Printf("ERROR: Password validation failed during registration - Username: %s", req.Username)
+			http.Error(w, "password must be at least 8 characters with uppercase, lowercase, digit, and special character", http.StatusBadRequest)
 			return
 		}
 
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
+			log.Printf("ERROR: Failed to hash password for user %s: %v", req.Username, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -43,12 +58,16 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 		if err != nil {
 			// Handle duplicate key
 			if strings.Contains(err.Error(), "duplicate key") {
+				log.Printf("ERROR: Registration failed - email or username already exists - Email: %s, Username: %s", req.Email, req.Username)
 				http.Error(w, "email or username already exists", http.StatusConflict)
 				return
 			}
+			log.Printf("ERROR: Failed to create user %s: %v", req.Username, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+
+		log.Printf("INFO: Successful registration - User: %s, ID: %d", resp.Username, resp.ID)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

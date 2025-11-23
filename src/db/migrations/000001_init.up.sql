@@ -10,6 +10,7 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Represents a financial institution linked to a user
 CREATE TABLE plaid_items (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -17,12 +18,13 @@ CREATE TABLE plaid_items (
     access_token TEXT UNIQUE NOT NULL,
     institution_id TEXT NOT NULL,
     institution_name TEXT,
-    cursor TEXT,
+    sync_cursor TEXT,
     status text NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Represents individual accounts within plaid_items (the financial institution linked to a user)
 CREATE TABLE accounts (
     id SERIAL PRIMARY KEY,
     item_id INTEGER REFERENCES plaid_items(id) ON DELETE CASCADE,
