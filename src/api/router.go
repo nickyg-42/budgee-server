@@ -31,6 +31,8 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 			r.Get("/plaid/accounts/{item_id}/db", handlers.GetAccountsFromDB(pool))
 			r.Get("/plaid/transactions/{item_id}/sync", handlers.SyncTransactions(plaidClient, pool))
 			r.Get("/plaid/transactions/{account_id}", handlers.GetTransactionsFromDB(pool))
+
+			r.Get("/user/{user_id}", handlers.GetUser(pool))
 		})
 	})
 
