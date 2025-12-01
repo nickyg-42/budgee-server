@@ -33,6 +33,8 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 			r.Get("/plaid/transactions/{account_id}", handlers.GetTransactionsFromDB(pool))
 
 			r.Get("/user/{user_id}", handlers.GetUser(pool))
+			r.Put("/user", handlers.UpdateUser(pool))
+			r.Post("/user/change-password", handlers.ChangePassword(pool))
 		})
 	})
 

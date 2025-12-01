@@ -131,7 +131,7 @@ func UpdateSyncCursor(ctx context.Context, pool *pgxpool.Pool, itemID int64, cur
 	return err
 }
 
-func SavePlaidItem(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID string, accessToken string) error {
+func SavePlaidItem(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID, accessToken, institutionID, institutionName string) error {
 	query := `
 		INSERT INTO plaid_items (user_id, item_id, access_token, institution_id, status)
 		VALUES ($1, $2, $3, $4, $5)
@@ -174,4 +174,10 @@ func SaveAccounts(ctx context.Context, pool *pgxpool.Pool, userID int64, account
 	}
 
 	return nil
+}
+
+func UpdatePlaidItemInstitution(ctx context.Context, pool *pgxpool.Pool, userID int64, institutionID string, institutionName string) error {
+	query := `UPDATE plaid_items SET institution_id = $1, institution_name = $2, updated_at = NOW() WHERE user_id = $3 AND item_id IN (SELECT item_id FROM plaid_items WHERE user_id = $3 ORDER BY created_at DESC LIMIT 1)`
+	_, err := pool.Exec(ctx, query, institutionID, institutionName, userID)
+	return err
 }

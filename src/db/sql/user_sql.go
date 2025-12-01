@@ -108,3 +108,29 @@ func DeleteUser(userID int, pool *pgxpool.Pool) error {
 
 	return nil
 }
+
+func UpdateUserProfile(ctx context.Context, pool *pgxpool.Pool, userID int64, email string, firstName string, lastName string) error {
+	query := `
+		UPDATE users
+		SET email = $1, first_name = $2, last_name = $3, updated_at = NOW()
+		WHERE id = $4
+	`
+	_, err := pool.Exec(ctx, query, email, firstName, lastName, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user profile: %w", err)
+	}
+	return nil
+}
+
+func UpdateUserPassword(ctx context.Context, pool *pgxpool.Pool, userID int64, hashedPassword string) error {
+	query := `
+		UPDATE users
+		SET password_hash = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+	_, err := pool.Exec(ctx, query, hashedPassword, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user password: %w", err)
+	}
+	return nil
+}

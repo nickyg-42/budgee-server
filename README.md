@@ -8,5 +8,4 @@ docker compose down -v   # removes DB + volume
 docker compose up -d     # recreate empty DB
 
 TODO:
-Auth flow is working well, just need to verify with plaid frontend in react
-it has libraries to convert link token into a link that returns public token.
+DO NOT PASS ACCESS TOKEN TO FRONTEND EVER

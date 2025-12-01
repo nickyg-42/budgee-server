@@ -26,7 +26,7 @@ func main() {
 	router := api.NewRouter(pool, plaidClient)
 
 	log.Println("API server running on port", cfg.Port)
-	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
+	if err := http.ListenAndServe("127.0.0.1:"+cfg.Port, router); err != nil {
 		log.Fatal(err)
 	}
 }
