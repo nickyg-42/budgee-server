@@ -9,5 +9,5 @@ docker compose up -d     # recreate empty DB
 
 TODO:
 1. DO NOT PASS ACCESS TOKEN TO FRONTEND EVER
-2. make sure accounts show after linking institution https://plaid.com/docs/api/accounts/
-3. Make transaction sync work
+2. Enhance transactions page charts and filters to function
+3. Adding multiple accounts does not work
