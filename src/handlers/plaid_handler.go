@@ -76,18 +76,11 @@ func ExchangePublicToken(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.
 			// Don't fail the flow, institution details are optional
 		}
 
-		log.Print(itemResp)
-		log.Print(itemResp.GetItem().InstitutionId.IsSet())
-		log.Print(itemResp.GetItem().AdditionalProperties)
-
 		institutionID := ""
 		if itemResp.GetItem().InstitutionId.IsSet() {
 			institutionID = *itemResp.GetItem().InstitutionId.Get()
 		}
 		institutionName := itemResp.GetItem().AdditionalProperties["institution_name"].(string)
-
-		log.Print(institutionID)
-		log.Print(institutionName)
 
 		err = db.SavePlaidItem(r.Context(), pool, userID, itemID, accessToken, institutionID, institutionName)
 		if err != nil {
@@ -164,34 +157,71 @@ func SyncTransactions(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Han
 			return
 		}
 
-		request := plaid.NewTransactionsSyncRequest(accessToken)
-		if cursor != "" {
-			request.SetCursor(cursor)
+		hasMore := true
+		var allAdded []plaid.Transaction
+		var allModified []plaid.Transaction
+		var allRemoved []plaid.RemovedTransaction
+
+		for hasMore {
+			request := plaid.NewTransactionsSyncRequest(accessToken)
+			if cursor != "" {
+				request.SetCursor(cursor)
+			}
+
+			transactionsResp, _, err := plaidClient.PlaidApi.TransactionsSync(context.Background()).TransactionsSyncRequest(*request).Execute()
+			if err != nil {
+				http.Error(w, "Failed to fetch transactions", http.StatusInternalServerError)
+				log.Printf("ERROR: Failed to sync transactions for user %d, item %d: %v", userID, dbItemID, err)
+				return
+			}
+
+			allAdded = append(allAdded, transactionsResp.GetAdded()...)
+			allModified = append(allModified, transactionsResp.GetModified()...)
+			allRemoved = append(allRemoved, transactionsResp.GetRemoved()...)
+
+			hasMore = transactionsResp.GetHasMore()
+			cursor = transactionsResp.GetNextCursor()
 		}
 
-		transactionsResp, _, err := plaidClient.PlaidApi.TransactionsSync(context.Background()).TransactionsSyncRequest(*request).Execute()
-		if err != nil {
-			http.Error(w, "Failed to fetch transactions", http.StatusInternalServerError)
-			log.Printf("ERROR: Failed to sync transactions for user %d, item %d: %v", userID, dbItemID, err)
-			return
-		}
-
-		err = db.SaveTransactions(r.Context(), pool, userID, transactionsResp.GetAdded())
+		// Save added transactions
+		err = db.SaveTransactions(r.Context(), pool, userID, allAdded)
 		if err != nil {
 			http.Error(w, "Failed to save transactions", http.StatusInternalServerError)
 			log.Printf("ERROR: Failed to save transactions for user %d: %v", userID, err)
 			return
 		}
 
-		err = db.UpdateSyncCursor(r.Context(), pool, dbItemID, transactionsResp.GetNextCursor())
+		// Update modified transactions
+		err = db.UpdateTransactions(r.Context(), pool, userID, allModified)
+		if err != nil {
+			http.Error(w, "Failed to update transactions", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to update transactions for user %d: %v", userID, err)
+			return
+		}
+
+		// Remove deleted transactions
+		err = db.RemoveTransactions(r.Context(), pool, userID, allRemoved)
+		if err != nil {
+			http.Error(w, "Failed to remove transactions", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to remove transactions for user %d: %v", userID, err)
+			return
+		}
+
+		err = db.UpdateSyncCursor(r.Context(), pool, dbItemID, cursor)
 		if err != nil {
 			http.Error(w, "Failed to update sync cursor", http.StatusInternalServerError)
 			log.Printf("ERROR: Failed to update sync cursor for item %d: %v", dbItemID, err)
 			return
 		}
 
+		log.Printf("INFO: Successfully synced transactions for user %d, item %d - Added: %d, Modified: %d, Removed: %d", userID, dbItemID, len(allAdded), len(allModified), len(allRemoved))
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(transactionsResp)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"added":    len(allAdded),
+			"modified": len(allModified),
+			"removed":  len(allRemoved),
+		})
 	}
 }
 
@@ -242,5 +272,42 @@ func GetTransactionsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(transactions)
+	}
+}
+
+func DeletePlaidItem(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value("user_id").(int64)
+		itemID := chi.URLParam(r, "item_id")
+
+		query := `SELECT user_id FROM plaid_items WHERE id = $1`
+		var ownerUserID int64
+		err := pool.QueryRow(r.Context(), query, itemID).Scan(&ownerUserID)
+		if err != nil {
+			http.Error(w, "Item not found", http.StatusNotFound)
+			log.Printf("ERROR: Failed to find plaid item - item_id: %s: %v", itemID, err)
+			return
+		}
+
+		if userID != ownerUserID {
+			log.Printf("ERROR: Unauthorized plaid item deletion attempt - Authenticated user: %d, Item owner: %d, Item: %s", userID, ownerUserID, itemID)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		err = db.DeletePlaidItem(r.Context(), pool, itemID)
+		if err != nil {
+			http.Error(w, "Failed to delete plaid item", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to delete plaid item - item_id: %s, user_id: %d: %v", itemID, userID, err)
+			return
+		}
+
+		log.Printf("INFO: Plaid item deleted - User: %d, Item: %s", userID, itemID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "item deleted successfully",
+		})
 	}
 }

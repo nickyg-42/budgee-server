@@ -3,13 +3,14 @@ package db
 import (
 	"budgee-server/src/models"
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/plaid/plaid-go/plaid"
 )
 
 func GetPlaidItemsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]models.PlaidItem, error) {
-	query := `SELECT id, user_id, access_token, item_id, created_at FROM plaid_items WHERE user_id = $1`
+	query := `SELECT id, user_id, access_token, item_id, institution_id, institution_name, created_at FROM plaid_items WHERE user_id = $1`
 
 	rows, err := pool.Query(ctx, query, userID)
 	if err != nil {
@@ -20,7 +21,7 @@ func GetPlaidItemsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]
 	var items []models.PlaidItem
 	for rows.Next() {
 		var item models.PlaidItem
-		err := rows.Scan(&item.ID, &item.UserID, &item.AccessToken, &item.ItemID, &item.CreatedAt)
+		err := rows.Scan(&item.ID, &item.UserID, &item.AccessToken, &item.ItemID, &item.InstitutionID, &item.InstitutionName, &item.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -32,7 +33,8 @@ func GetPlaidItemsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]
 
 func GetAccountsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID string) ([]models.Account, error) {
 	query := `
-		SELECT a.id, a.item_id, a.account_id, a.name, a.official_name, a.mask, a.type, a.subtype, a.current_balance, a.available_balance, a.created_at 
+		SELECT a.id, a.item_id, a.account_id, a.name, a.official_name, a.mask, a.type, a.subtype, 
+		       COALESCE(a.current_balance, 0), COALESCE(a.available_balance, 0), a.created_at 
 		FROM accounts a
 		JOIN plaid_items p ON a.item_id = p.id
 		WHERE p.user_id = $1 AND p.id = $2
@@ -59,7 +61,7 @@ func GetAccountsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemI
 
 func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, accountID string) ([]models.Transaction, error) {
 	query := `
-		SELECT t.id, t.account_id, t.amount, t.name, t.date, t.category, t.created_at
+		SELECT t.id, t.account_id, t.amount, t.name, t.date, t.category, t.merchant_name, t.currency, t.account_owner, t.created_at
 		FROM transactions t
 		JOIN accounts a ON t.account_id = a.id
 		JOIN plaid_items p ON a.item_id = p.id
@@ -75,7 +77,7 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 	var transactions []models.Transaction
 	for rows.Next() {
 		var transaction models.Transaction
-		err := rows.Scan(&transaction.ID, &transaction.AccountID, &transaction.Amount, &transaction.Description, &transaction.Date, &transaction.Category, &transaction.CreatedAt)
+		err := rows.Scan(&transaction.ID, &transaction.AccountID, &transaction.Amount, &transaction.Description, &transaction.Date, &transaction.Category, &transaction.MerchantName, &transaction.Currency, &transaction.AccountOwner, &transaction.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -88,24 +90,92 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, transactions []plaid.Transaction) error {
 	for _, txn := range transactions {
 		query := `
-			INSERT INTO transactions (account_id, transaction_id, amount, name, date, category, pending, created_at)
-			SELECT $1, $2, $3, $4, $5, $6, $7, NOW()
+			INSERT INTO transactions (account_id, transaction_id, amount, name, date, category, pending, type, merchant_name, currency, account_owner, created_at)
+			SELECT a.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
 			FROM accounts a
 			JOIN plaid_items p ON a.item_id = p.id
-			WHERE p.user_id = $8 AND a.account_id = $9
+			WHERE p.user_id = $12 AND a.account_id = $1
 			ON CONFLICT (transaction_id) DO NOTHING
 		`
 
+		category := ""
+		if txn.PersonalFinanceCategory.IsSet() {
+			category = txn.GetPersonalFinanceCategory().Primary
+		}
+
 		_, err := pool.Exec(ctx, query,
-			txn.GetAccountId(),
+			txn.GetAccountId(),       // $1
+			txn.GetTransactionId(),   // $2
+			txn.GetAmount(),          // $3
+			txn.GetName(),            // $4
+			txn.GetDate(),            // $5
+			category,                 // $6
+			txn.GetPending(),         // $7
+			txn.GetTransactionType(), // $8
+			txn.GetMerchantName(),    // $9
+			txn.GetIsoCurrencyCode(), // $10
+			txn.GetAccountOwner(),    // $11
+			userID,                   // $12
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func UpdateTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, transactions []plaid.Transaction) error {
+	for _, txn := range transactions {
+		query := `
+			UPDATE transactions
+			SET amount = $1, name = $2, date = $3, category = $4, pending = $5, merchant_name = $6, currency = $7, account_owner = $8, updated_at = NOW()
+			WHERE transaction_id = $9 AND account_id IN (
+				SELECT a.id FROM accounts a
+				JOIN plaid_items p ON a.item_id = p.id
+				WHERE p.user_id = $10
+			)
+		`
+
+		category := ""
+		if txn.PersonalFinanceCategory.IsSet() {
+			category = txn.GetPersonalFinanceCategory().Primary
+		}
+
+		_, err := pool.Exec(ctx, query,
+			txn.GetAmount(),          // $1
+			txn.GetName(),            // $2
+			txn.GetDate(),            // $3
+			category,                 // $4
+			txn.GetPending(),         // $5
+			txn.GetMerchantName(),    // $6
+			txn.GetIsoCurrencyCode(), // $7
+			txn.GetAccountOwner(),    // $8
+			txn.GetTransactionId(),   // $9
+			userID,                   // $10
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func RemoveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, removedTransactions []plaid.RemovedTransaction) error {
+	for _, txn := range removedTransactions {
+		query := `
+			DELETE FROM transactions
+			WHERE transaction_id = $1 AND account_id IN (
+				SELECT a.id FROM accounts a
+				JOIN plaid_items p ON a.item_id = p.id
+				WHERE p.user_id = $2
+			)
+		`
+
+		_, err := pool.Exec(ctx, query,
 			txn.GetTransactionId(),
-			txn.GetAmount(),
-			txn.GetName(),
-			txn.GetDate(),
-			txn.GetPersonalFinanceCategory(),
-			txn.GetPending(),
 			userID,
-			txn.GetAccountId(),
 		)
 		if err != nil {
 			return err
@@ -133,12 +203,12 @@ func UpdateSyncCursor(ctx context.Context, pool *pgxpool.Pool, itemID int64, cur
 
 func SavePlaidItem(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID, accessToken, institutionID, institutionName string) error {
 	query := `
-		INSERT INTO plaid_items (user_id, item_id, access_token, institution_id, status)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO plaid_items (user_id, item_id, access_token, institution_id, institution_name, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (item_id) DO NOTHING
 	`
 
-	_, err := pool.Exec(ctx, query, userID, itemID, accessToken, "", "active")
+	_, err := pool.Exec(ctx, query, userID, itemID, accessToken, institutionID, institutionName, "active")
 	return err
 }
 
@@ -164,8 +234,8 @@ func SaveAccounts(ctx context.Context, pool *pgxpool.Pool, userID int64, account
 			acc.GetMask(),
 			acc.GetSubtype(),
 			acc.GetType(),
-			acc.GetBalances().Current,
-			acc.GetBalances().Available,
+			acc.GetBalances().Current.Get(),
+			acc.GetBalances().Available.Get(),
 			userID,
 		)
 		if err != nil {
@@ -180,4 +250,13 @@ func UpdatePlaidItemInstitution(ctx context.Context, pool *pgxpool.Pool, userID 
 	query := `UPDATE plaid_items SET institution_id = $1, institution_name = $2, updated_at = NOW() WHERE user_id = $3 AND item_id IN (SELECT item_id FROM plaid_items WHERE user_id = $3 ORDER BY created_at DESC LIMIT 1)`
 	_, err := pool.Exec(ctx, query, institutionID, institutionName, userID)
 	return err
+}
+
+func DeletePlaidItem(ctx context.Context, pool *pgxpool.Pool, itemID string) error {
+	query := `DELETE FROM plaid_items WHERE id = $1`
+	_, err := pool.Exec(ctx, query, itemID)
+	if err != nil {
+		return fmt.Errorf("failed to delete plaid item: %w", err)
+	}
+	return nil
 }
