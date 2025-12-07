@@ -6,8 +6,3 @@ create a new migration: migrate create -ext sql -dir src/db/migrations -seq <mig
 
 docker compose down -v   # removes DB + volume
 docker compose up -d     # recreate empty DB
-
-TODO:
-1. DO NOT PASS ACCESS TOKEN TO FRONTEND EVER
-2. Enhance transactions page charts and filters to function
-3. Adding multiple accounts does not work
