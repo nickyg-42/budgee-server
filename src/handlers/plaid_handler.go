@@ -311,3 +311,96 @@ func DeletePlaidItem(pool *pgxpool.Pool) http.HandlerFunc {
 		})
 	}
 }
+
+func UpdateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value("user_id").(int64)
+		transactionIDStr := chi.URLParam(r, "transaction_id")
+		transactionID, err := strconv.Atoi(transactionIDStr)
+		if err != nil {
+			log.Printf("ERROR: Invalid transaction_id: %s", transactionIDStr)
+			http.Error(w, "invalid transaction id", http.StatusBadRequest)
+			return
+		}
+
+		var req struct {
+			Amount       float64 `json:"amount"`
+			Category     string  `json:"category"`
+			MerchantName string  `json:"merchant_name"`
+			Date         string  `json:"date"` // Expecting YYYY-MM-DD
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode update transaction request body: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		// Check ownership using integer keys
+		query := `
+			SELECT t.id FROM transactions t
+			JOIN accounts a ON t.account_id = a.id
+			JOIN plaid_items p ON a.item_id = p.id
+			WHERE t.id = $1 AND p.user_id = $2
+		`
+		var id int
+		err = pool.QueryRow(r.Context(), query, transactionID, userID).Scan(&id)
+		if err != nil {
+			log.Printf("ERROR: Transaction not found or forbidden for update - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
+			http.Error(w, "transaction not found or forbidden", http.StatusForbidden)
+			return
+		}
+
+		updateQuery := `
+			UPDATE transactions
+			SET amount = $1, category = $2, merchant_name = $3, date = $4, updated_at = NOW()
+			WHERE id = $5
+		`
+		_, err = pool.Exec(r.Context(), updateQuery, req.Amount, req.Category, req.MerchantName, req.Date, transactionID)
+		if err != nil {
+			log.Printf("ERROR: Failed to update transaction - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
+			http.Error(w, "failed to update transaction", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "transaction updated"})
+	}
+}
+
+func DeleteTransaction(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value("user_id").(int64)
+		transactionIDStr := chi.URLParam(r, "transaction_id")
+		transactionID, err := strconv.Atoi(transactionIDStr)
+		if err != nil {
+			log.Printf("ERROR: Invalid transaction_id: %s", transactionIDStr)
+			http.Error(w, "invalid transaction id", http.StatusBadRequest)
+			return
+		}
+
+		// Check ownership using integer keys
+		query := `
+			SELECT t.id FROM transactions t
+			JOIN accounts a ON t.account_id = a.id
+			JOIN plaid_items p ON a.item_id = p.id
+			WHERE t.id = $1 AND p.user_id = $2
+		`
+		var id int
+		err = pool.QueryRow(r.Context(), query, transactionID, userID).Scan(&id)
+		if err != nil {
+			log.Printf("ERROR: Transaction not found or forbidden for delete - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
+			http.Error(w, "transaction not found or forbidden", http.StatusForbidden)
+			return
+		}
+
+		_, err = pool.Exec(r.Context(), "DELETE FROM transactions WHERE id = $1", transactionID)
+		if err != nil {
+			log.Printf("ERROR: Failed to delete transaction - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
+			http.Error(w, "failed to delete transaction", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "transaction deleted"})
+	}
+}

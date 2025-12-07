@@ -61,7 +61,9 @@ func GetAccountsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemI
 
 func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, accountID string) ([]models.Transaction, error) {
 	query := `
-		SELECT t.id, t.account_id, t.amount, t.name, t.date, t.category, t.merchant_name, t.currency, t.account_owner, t.created_at
+		SELECT 
+			t.id, t.account_id, t.transaction_id, t.plaid_category_id, t.category, t.type, t.name, t.merchant_name,
+			t.amount, t.currency, t.date, t.pending, t.account_owner, t.created_at, t.updated_at
 		FROM transactions t
 		JOIN accounts a ON t.account_id = a.id
 		JOIN plaid_items p ON a.item_id = p.id
@@ -77,7 +79,23 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 	var transactions []models.Transaction
 	for rows.Next() {
 		var transaction models.Transaction
-		err := rows.Scan(&transaction.ID, &transaction.AccountID, &transaction.Amount, &transaction.Description, &transaction.Date, &transaction.Category, &transaction.MerchantName, &transaction.Currency, &transaction.AccountOwner, &transaction.CreatedAt)
+		err := rows.Scan(
+			&transaction.ID,
+			&transaction.AccountID,
+			&transaction.TransactionID,
+			&transaction.PlaidCategoryID,
+			&transaction.Category,
+			&transaction.Type,
+			&transaction.Name,
+			&transaction.MerchantName,
+			&transaction.Amount,
+			&transaction.Currency,
+			&transaction.Date,
+			&transaction.Pending,
+			&transaction.AccountOwner,
+			&transaction.CreatedAt,
+			&transaction.UpdatedAt,
+		)
 		if err != nil {
 			return nil, err
 		}
