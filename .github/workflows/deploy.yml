@@ -20,9 +20,9 @@ jobs:
 
       - name: Build Go application
         run: |
-          go build -o budgee-api
+          go build -o budgee-api ./src
 
-      - name: Stop uccelli-api service
+      - name: Stop budgee-api service
         run: |
           sudo systemctl stop budgee-api
         
