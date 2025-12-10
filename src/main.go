@@ -10,6 +10,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -19,6 +20,15 @@ import (
 
 func main() {
 	cfg := config.Load()
+
+	logFile, err := os.OpenFile("/var/log/budgee-api.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("Warning: Failed to open log file, defaulting to stdout: %v", err)
+	} else {
+		defer logFile.Close()
+		log.SetOutput(logFile)
+		log.Println("Log file attached...")
+	}
 
 	// Connect to database
 	pool, err := sql.Connect(cfg.DatabaseURL)
