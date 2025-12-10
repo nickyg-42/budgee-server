@@ -137,3 +137,42 @@ func ChangePassword(pool *pgxpool.Pool) http.HandlerFunc {
 		})
 	}
 }
+
+func DeleteUser(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value("user_id").(int64)
+
+		log.Printf("INFO: DeleteUser called for user_id: %d", userID)
+
+		// Security: Only allow user to delete themselves
+		var req struct {
+			UserID int64 `json:"user_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode delete user request body for user_id: %d: %v", userID, err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if req.UserID != userID {
+			log.Printf("ERROR: Forbidden delete attempt - Authenticated user: %d, Requested user: %d", userID, req.UserID)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		log.Printf("INFO: Deleting user %d and all associated data", userID)
+		err := db.DeleteUser(int(userID), pool)
+		if err != nil {
+			log.Printf("ERROR: Failed to delete user %d: %v", userID, err)
+			http.Error(w, "failed to delete user", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: User %d deleted successfully. Instructing client to remove JWT and redirect.", userID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message":  "user deleted",
+			"redirect": "/register",
+		})
+	}
+}

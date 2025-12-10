@@ -27,6 +27,7 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 			r.Get("/user/{user_id}", handlers.GetUser(pool))
 			r.Put("/user", handlers.UpdateUser(pool))
 			r.Post("/user/change-password", handlers.ChangePassword(pool))
+			r.Delete("/user", handlers.DeleteUser(pool))
 
 			r.Post("/plaid/create-link-token", handlers.CreateLinkToken(plaidClient, pool))
 			r.Post("/plaid/exchange-public-token", handlers.ExchangePublicToken(plaidClient, pool))
@@ -35,7 +36,7 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 			r.Get("/plaid/accounts/{item_id}/db", handlers.GetAccountsFromDB(pool))
 			r.Get("/plaid/transactions/{item_id}/sync", handlers.SyncTransactions(plaidClient, pool))
 			r.Get("/plaid/transactions/{account_id}", handlers.GetTransactionsFromDB(pool))
-			r.Delete("/plaid/items/{item_id}", handlers.DeletePlaidItem(pool))
+			r.Delete("/plaid/items/{item_id}", handlers.DeletePlaidItem(plaidClient, pool))
 			r.Put("/plaid/transactions/{transaction_id}", handlers.UpdateTransaction(pool))
 			r.Delete("/plaid/transactions/{transaction_id}", handlers.DeleteTransaction(pool))
 		})

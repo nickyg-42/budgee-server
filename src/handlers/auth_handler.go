@@ -28,6 +28,21 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 		req.Email = strings.TrimSpace(req.Email)
 		req.Username = strings.TrimSpace(req.Username)
 
+		// Gmail whitelist check
+		allowedGmails := strings.Split(os.Getenv("ALLOWED_GMAILS"), ",")
+		emailAllowed := false
+		for _, allowed := range allowedGmails {
+			if strings.EqualFold(strings.TrimSpace(allowed), req.Email) {
+				emailAllowed = true
+				break
+			}
+		}
+		if !emailAllowed {
+			log.Printf("ERROR: Registration denied for non-whitelisted email: %s", req.Email)
+			http.Error(w, "registration is restricted to invited emails", http.StatusForbidden)
+			return
+		}
+
 		if !util.ValidateEmail(req.Email) {
 			log.Printf("ERROR: Email validation failed during registration - Email: %s", req.Email)
 			http.Error(w, "invalid email format", http.StatusBadRequest)
@@ -69,9 +84,25 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 
 		log.Printf("INFO: Successful registration - User: %s, ID: %d", resp.Username, resp.ID)
 
+		// Generate JWT token for the new user
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"user_id":  resp.ID,
+			"username": resp.Username,
+			"exp":      time.Now().Add(time.Hour * 504).Unix(),
+		})
+
+		tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+		if err != nil {
+			log.Printf("ERROR: Failed to generate JWT token for user %s: %v", resp.Username, err)
+			http.Error(w, "Error generating token", http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(map[string]string{
+			"token": tokenString,
+		})
 	}
 }
 

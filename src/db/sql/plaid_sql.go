@@ -278,3 +278,23 @@ func DeletePlaidItem(ctx context.Context, pool *pgxpool.Pool, itemID string) err
 	}
 	return nil
 }
+
+func GetAllPlaidItems(ctx context.Context, pool *pgxpool.Pool) ([]models.PlaidItem, error) {
+	query := `SELECT id, user_id, access_token, item_id, institution_id, institution_name, created_at FROM plaid_items`
+	rows, err := pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []models.PlaidItem
+	for rows.Next() {
+		var item models.PlaidItem
+		err := rows.Scan(&item.ID, &item.UserID, &item.AccessToken, &item.ItemID, &item.InstitutionID, &item.InstitutionName, &item.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}

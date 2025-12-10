@@ -275,14 +275,16 @@ func GetTransactionsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-func DeletePlaidItem(pool *pgxpool.Pool) http.HandlerFunc {
+func DeletePlaidItem(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value("user_id").(int64)
 		itemID := chi.URLParam(r, "item_id")
 
-		query := `SELECT user_id FROM plaid_items WHERE id = $1`
+		// Fetch owner and access token
+		query := `SELECT user_id, access_token FROM plaid_items WHERE id = $1`
 		var ownerUserID int64
-		err := pool.QueryRow(r.Context(), query, itemID).Scan(&ownerUserID)
+		var accessToken string
+		err := pool.QueryRow(r.Context(), query, itemID).Scan(&ownerUserID, &accessToken)
 		if err != nil {
 			http.Error(w, "Item not found", http.StatusNotFound)
 			log.Printf("ERROR: Failed to find plaid item - item_id: %s: %v", itemID, err)
@@ -295,6 +297,16 @@ func DeletePlaidItem(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		// Remove item from Plaid
+		request := plaid.NewItemRemoveRequest(accessToken)
+		_, _, err = plaidClient.PlaidApi.ItemRemove(r.Context()).ItemRemoveRequest(*request).Execute()
+		if err != nil {
+			http.Error(w, "Failed to remove item from Plaid", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to remove item from Plaid - item_id: %s, user_id: %d: %v", itemID, userID, err)
+			return
+		}
+
+		// Remove item from DB
 		err = db.DeletePlaidItem(r.Context(), pool, itemID)
 		if err != nil {
 			http.Error(w, "Failed to delete plaid item", http.StatusInternalServerError)
