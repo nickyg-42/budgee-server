@@ -24,16 +24,21 @@ jobs:
 
       - name: Stop uccelli-api service
         run: |
-          sudo systemctl stop uccelli-api
+          sudo systemctl stop budgee-api
+        
+      - name: Run database migrations
+        run: migrate -path src/db/migrations -database "$PROD_DATABASE_URL" up
+        env:
+            PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
 
       - name: Copy Binary to user bin
         run: |
-          sudo cp uccelli-api /usr/local/bin
+          sudo cp budgee-api /usr/local/bin/budgee-api
 
-      - name: Start uccelli-api service
+      - name: Start budgee-api service
         run: |
-          sudo systemctl start uccelli-api
+          sudo systemctl start budgee-api
 
-      - name: Verify uccelli-api service status
+      - name: Verify budgee-api service status
         run: |
-          sudo systemctl status uccelli-api --no-pager
+          sudo systemctl status budgee-api --no-pager

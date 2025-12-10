@@ -1,0 +1,8 @@
+```yaml
+# ...existing code...
+    - name: Run database migrations
+      run: migrate -path src/db/migrations -database "$PROD_DATABASE_URL" up
+      env:
+        PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+# ...existing code...
+```
