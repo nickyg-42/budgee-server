@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/plaid/plaid-go/plaid"
+	"github.com/plaid/plaid-go/v41/plaid"
 )
 
 func GetPlaidItemsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]models.PlaidItem, error) {
@@ -230,31 +230,24 @@ func SavePlaidItem(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID
 	return err
 }
 
-func SaveAccounts(ctx context.Context, pool *pgxpool.Pool, userID int64, accounts []plaid.AccountBase) error {
+func SaveAccounts(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID string, accounts []plaid.AccountBase) error {
 	for _, acc := range accounts {
 		query := `
 			INSERT INTO accounts (item_id, account_id, name, official_name, mask, type, subtype, current_balance, available_balance)
-			SELECT p.id, $1, $2, $3, $4, $5, $6, $7, $8
-			FROM plaid_items p
-			WHERE p.user_id = $9
-			ON CONFLICT (account_id) DO UPDATE SET 
-				name = $2, 
-				official_name = $3,
-				current_balance = $7,
-				available_balance = $8,
-				updated_at = NOW()
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT DO NOTHING
 		`
 
 		_, err := pool.Exec(ctx, query,
+			itemID,
 			acc.GetAccountId(),
 			acc.GetName(),
 			acc.GetOfficialName(),
 			acc.GetMask(),
-			acc.GetSubtype(),
 			acc.GetType(),
+			acc.GetSubtype(),
 			acc.GetBalances().Current.Get(),
 			acc.GetBalances().Available.Get(),
-			userID,
 		)
 		if err != nil {
 			return err

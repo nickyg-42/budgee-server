@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/plaid/plaid-go/plaid"
+	"github.com/plaid/plaid-go/v41/plaid"
 )
 
 func main() {

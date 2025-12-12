@@ -76,3 +76,5 @@ docker-compose.override.yml
 # Ignore local config used by developers
 local.yaml
 .env
+
+*.png

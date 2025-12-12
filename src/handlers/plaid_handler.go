@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/plaid/plaid-go/plaid"
+	"github.com/plaid/plaid-go/v41/plaid"
 )
 
 func CreateLinkToken(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
@@ -20,13 +20,21 @@ func CreateLinkToken(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Hand
 		user := plaid.LinkTokenCreateRequestUser{
 			ClientUserId: strconv.FormatInt(userID, 10),
 		}
+
+		var days int32 = 370
+		transactions := plaid.LinkTokenTransactions{
+			DaysRequested: &days,
+		}
+
 		request := plaid.NewLinkTokenCreateRequest(
 			"Budgee",
 			"en",
 			[]plaid.CountryCode{plaid.COUNTRYCODE_US},
-			user,
 		)
+		request.SetUser(user)
 		request.SetProducts([]plaid.Products{plaid.PRODUCTS_TRANSACTIONS})
+		request.SetTransactions(transactions)
+
 		resp, _, err := plaidClient.PlaidApi.LinkTokenCreate(context.Background()).LinkTokenCreateRequest(*request).Execute()
 		if err != nil {
 			http.Error(w, "Failed to create link token", http.StatusInternalServerError)
@@ -80,7 +88,10 @@ func ExchangePublicToken(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.
 		if itemResp.GetItem().InstitutionId.IsSet() {
 			institutionID = *itemResp.GetItem().InstitutionId.Get()
 		}
-		institutionName := itemResp.GetItem().AdditionalProperties["institution_name"].(string)
+		institutionName := ""
+		if itemResp.GetItem().InstitutionName.IsSet() {
+			institutionName = *itemResp.GetItem().InstitutionName.Get()
+		}
 
 		err = db.SavePlaidItem(r.Context(), pool, userID, itemID, accessToken, institutionID, institutionName)
 		if err != nil {
@@ -105,10 +116,11 @@ func GetPlaidAccounts(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Han
 		userID := r.Context().Value("user_id").(int64)
 		itemID := chi.URLParam(r, "item_id")
 
-		query := `SELECT id, access_token FROM plaid_items WHERE user_id = $1 AND id = $2`
-		var dbItemID int64
+		log.Println("Fetching accounts for user:", userID, "item:", itemID)
+
+		query := `SELECT access_token FROM plaid_items WHERE user_id = $1 AND id = $2`
 		var accessToken string
-		err := pool.QueryRow(r.Context(), query, userID, itemID).Scan(&dbItemID, &accessToken)
+		err := pool.QueryRow(r.Context(), query, userID, itemID).Scan(&accessToken)
 		if err != nil {
 			http.Error(w, "Access token not found", http.StatusNotFound)
 			log.Printf("ERROR: Failed to get access token for user %d, item %s: %v", userID, itemID, err)
@@ -123,7 +135,7 @@ func GetPlaidAccounts(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Han
 			return
 		}
 
-		err = db.SaveAccounts(r.Context(), pool, userID, accountsResp.GetAccounts())
+		err = db.SaveAccounts(r.Context(), pool, userID, itemID, accountsResp.GetAccounts())
 		if err != nil {
 			http.Error(w, "Failed to save accounts", http.StatusInternalServerError)
 			log.Printf("ERROR: Failed to save accounts for user %d: %v", userID, err)

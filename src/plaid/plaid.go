@@ -3,7 +3,7 @@ package plaid
 import (
 	"log"
 
-	"github.com/plaid/plaid-go/plaid"
+	"github.com/plaid/plaid-go/v41/plaid"
 )
 
 func NewPlaidClient(clientID, secret, env string) *plaid.APIClient {
@@ -14,8 +14,6 @@ func NewPlaidClient(clientID, secret, env string) *plaid.APIClient {
 	switch env {
 	case "sandbox":
 		configuration.UseEnvironment(plaid.Sandbox)
-	case "development":
-		configuration.UseEnvironment(plaid.Development)
 	case "production":
 		configuration.UseEnvironment(plaid.Production)
 	default:

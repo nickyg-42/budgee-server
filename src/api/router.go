@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/plaid/plaid-go/plaid"
+	"github.com/plaid/plaid-go/v41/plaid"
 )
 
 func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
