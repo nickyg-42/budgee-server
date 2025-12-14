@@ -535,7 +535,10 @@ func PlaidWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Handler
 		switch req.WebhookCode {
 		case "SYNC_UPDATES_AVAILABLE":
 			log.Printf("INFO: Received Plaid webhook to sync transactions - Item: %s, Webhook Code: %s", req.ItemID, req.WebhookCode)
+
+			// Trigger async in goroutine to ensure quick 200 response to Plaid
 			go TriggerTransactionSyncFromWebhook(plaidClient, pool, req.ItemID)
+
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]string{"status": "received"})
