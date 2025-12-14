@@ -10,7 +10,7 @@ import (
 	"github.com/plaid/plaid-go/v41/plaid"
 )
 
-func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
+func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.CORSMiddleware)
 
@@ -21,8 +21,12 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient) *chi.Mux {
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/login", handlers.Login(pool))
 		r.Post("/register", handlers.Register(pool))
+		r.Post("/plaid/webhook", handlers.PlaidWebhook(plaidClient, pool))
+		if plaidEnv == "sandbox" {
+			r.Post("/plaid/sandbox/fire_webhook", handlers.FireSandboxWebhook(plaidClient, pool))
+		}
 
-		// JWT required routes
+		// Protected routes
 		r.With(middleware.JWTAuthMiddleware).Group(func(r chi.Router) {
 			r.Get("/user/{user_id}", handlers.GetUser(pool))
 			r.Put("/user", handlers.UpdateUser(pool))

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ParseTokenFromRequest extracts and validates JWT token from request, returning claims if valid

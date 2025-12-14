@@ -291,3 +291,14 @@ func GetAllPlaidItems(ctx context.Context, pool *pgxpool.Pool) ([]models.PlaidIt
 	}
 	return items, rows.Err()
 }
+
+func GetPlaidItemByItemID(ctx context.Context, pool *pgxpool.Pool, itemID string) (*models.PlaidItem, error) {
+	query := `SELECT id, user_id, access_token, item_id, institution_id, institution_name, created_at FROM plaid_items WHERE item_id = $1`
+
+	var item models.PlaidItem
+	err := pool.QueryRow(ctx, query, itemID).Scan(&item.ID, &item.UserID, &item.AccessToken, &item.ItemID, &item.InstitutionID, &item.InstitutionName, &item.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}

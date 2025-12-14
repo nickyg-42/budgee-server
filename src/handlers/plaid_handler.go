@@ -2,10 +2,15 @@ package handlers
 
 import (
 	db "budgee-server/src/db/sql"
+	"budgee-server/src/models"
+	"budgee-server/src/util"
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -34,6 +39,11 @@ func CreateLinkToken(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Hand
 		request.SetUser(user)
 		request.SetProducts([]plaid.Products{plaid.PRODUCTS_TRANSACTIONS})
 		request.SetTransactions(transactions)
+
+		webhookURL := os.Getenv("PLAID_WEBHOOK_URL")
+		if webhookURL != "" {
+			request.SetWebhook(webhookURL)
+		}
 
 		resp, _, err := plaidClient.PlaidApi.LinkTokenCreate(context.Background()).LinkTokenCreateRequest(*request).Execute()
 		if err != nil {
@@ -237,6 +247,61 @@ func SyncTransactions(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Han
 	}
 }
 
+func SyncTransactionsForItem(ctx context.Context, pool *pgxpool.Pool, plaidClient *plaid.APIClient, item *models.PlaidItem) error {
+	itemIDInt, err := strconv.ParseInt(item.ID, 10, 64)
+	if err != nil {
+		return err
+	}
+
+	cursor, err := db.GetSyncCursor(ctx, pool, itemIDInt)
+	if err != nil {
+		return err
+	}
+
+	hasMore := true
+	var allAdded []plaid.Transaction
+	var allModified []plaid.Transaction
+	var allRemoved []plaid.RemovedTransaction
+
+	for hasMore {
+		request := plaid.NewTransactionsSyncRequest(item.AccessToken)
+		if cursor != "" {
+			request.SetCursor(cursor)
+		}
+		transactionsResp, _, err := plaidClient.PlaidApi.TransactionsSync(ctx).TransactionsSyncRequest(*request).Execute()
+		if err != nil {
+			return err
+		}
+		allAdded = append(allAdded, transactionsResp.GetAdded()...)
+		allModified = append(allModified, transactionsResp.GetModified()...)
+		allRemoved = append(allRemoved, transactionsResp.GetRemoved()...)
+		hasMore = transactionsResp.GetHasMore()
+		cursor = transactionsResp.GetNextCursor()
+	}
+
+	// Save added transactions
+	if err := db.SaveTransactions(ctx, pool, item.UserID, allAdded); err != nil {
+		return err
+	}
+	// Update modified transactions
+	if err := db.UpdateTransactions(ctx, pool, item.UserID, allModified); err != nil {
+		return err
+	}
+	// Remove deleted transactions
+	if err := db.RemoveTransactions(ctx, pool, item.UserID, allRemoved); err != nil {
+		return err
+	}
+	// Update sync cursor
+	if err := db.UpdateSyncCursor(ctx, pool, itemIDInt, cursor); err != nil {
+		return err
+	}
+
+	log.Printf("INFO: Successfully synced transactions for user %d, item %d - Added: %d, Modified: %d, Removed: %d",
+		item.UserID, itemIDInt, len(allAdded), len(allModified), len(allRemoved))
+
+	return nil
+}
+
 func GetPlaidItemsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value("user_id").(int64)
@@ -426,5 +491,110 @@ func DeleteTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": "transaction deleted"})
+	}
+}
+
+func PlaidWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			WebhookCode string `json:"webhook_code"`
+			ItemID      string `json:"item_id"`
+		}
+
+		// Read the raw body for verification
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("ERROR: Failed to read webhook request body: %v", err)
+			http.Error(w, "invalid webhook", http.StatusBadRequest)
+			return
+		}
+		// Restore the body for json decoding
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode webhook request body: %v", err)
+			http.Error(w, "invalid webhook", http.StatusBadRequest)
+			return
+		}
+
+		// Convert headers to map[string]string
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+
+		valid, err := util.VerifyWebhook(r.Context(), plaidClient, bodyBytes, headers)
+		if err != nil || !valid {
+			log.Printf("ERROR: Failed to verify webhook: %v", err)
+			http.Error(w, "invalid webhook", http.StatusBadRequest)
+			return
+		}
+
+		switch req.WebhookCode {
+		case "SYNC_UPDATES_AVAILABLE":
+			log.Printf("INFO: Received Plaid webhook to sync transactions - Item: %s, Webhook Code: %s", req.ItemID, req.WebhookCode)
+			go TriggerTransactionSyncFromWebhook(plaidClient, pool, req.ItemID)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "received"})
+			return
+		default:
+			log.Printf("INFO: Received unhandled Plaid webhook - Item: %s, Webhook Code: %s", req.ItemID, req.WebhookCode)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "received"})
+		}
+	}
+}
+
+func TriggerTransactionSyncFromWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool, itemID string) {
+	// Get item from db using itemID lookup
+	item, err := db.GetPlaidItemByItemID(context.Background(), pool, itemID)
+	if err != nil {
+		log.Printf("ERROR: From Webhook: Failed to fetch item for item_id %s: %v", itemID, err)
+		return
+	}
+	err = SyncTransactionsForItem(context.Background(), pool, plaidClient, item)
+	if err != nil {
+		log.Printf("ERROR: From Webhook: Failed to sync transactions for item %s: %v", itemID, err)
+	} else {
+		log.Printf("INFO: From Webhook: Successfully synced transactions for item %s", itemID)
+	}
+}
+
+func FireSandboxWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ItemID      string `json:"item_id"`
+			WebhookCode string `json:"webhook_code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode fire_webhook request body: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		// Look up the access token for the given item_id
+		var accessToken string
+		err := pool.QueryRow(r.Context(), "SELECT access_token FROM plaid_items WHERE item_id = $1", req.ItemID).Scan(&accessToken)
+		if err != nil {
+			log.Printf("ERROR: Failed to find access token for item_id %s: %v", req.ItemID, err)
+			http.Error(w, "item not found", http.StatusNotFound)
+			return
+		}
+
+		fireReq := plaid.NewSandboxItemFireWebhookRequest(accessToken, req.WebhookCode)
+		_, _, err = plaidClient.PlaidApi.SandboxItemFireWebhook(r.Context()).SandboxItemFireWebhookRequest(*fireReq).Execute()
+		if err != nil {
+			log.Printf("ERROR: Failed to fire sandbox webhook for item_id %s: %v", req.ItemID, err)
+			http.Error(w, "failed to fire webhook", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: Fired sandbox webhook for item_id %s, webhook_code %s", req.ItemID, req.WebhookCode)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "webhook fired"})
 	}
 }
