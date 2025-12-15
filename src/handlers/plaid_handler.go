@@ -259,12 +259,17 @@ func SyncTransactionsForItem(ctx context.Context, pool *pgxpool.Pool, plaidClien
 	}
 
 	hasMore := true
+	options := plaid.NewTransactionsSyncRequestOptions()
+	options.SetIncludePersonalFinanceCategory(true)
+	options.SetPersonalFinanceCategoryVersion(plaid.PERSONALFINANCECATEGORYVERSION_V2)
+
 	var allAdded []plaid.Transaction
 	var allModified []plaid.Transaction
 	var allRemoved []plaid.RemovedTransaction
 
 	for hasMore {
 		request := plaid.NewTransactionsSyncRequest(item.AccessToken)
+		request.SetOptions(*options)
 		if cursor != "" {
 			request.SetCursor(cursor)
 		}
@@ -413,10 +418,13 @@ func UpdateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		var req struct {
-			Amount       float64 `json:"amount"`
-			Category     string  `json:"category"`
-			MerchantName string  `json:"merchant_name"`
-			Date         string  `json:"date"` // Expecting YYYY-MM-DD
+			Amount                         float64 `json:"amount"`
+			PrimaryCategory                string  `json:"primary_category"`
+			DetailedCategory               string  `json:"detailed_category"`
+			MerchantName                   string  `json:"merchant_name"`
+			Date                           string  `json:"date"` // Expecting YYYY-MM-DD
+			PaymentChannel                 string  `json:"payment_channel"`
+			PersonalFinanceCategoryIconURL string  `json:"personal_finance_category_icon_url"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			log.Printf("ERROR: Failed to decode update transaction request body: %v", err)
@@ -441,10 +449,10 @@ func UpdateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 
 		updateQuery := `
 			UPDATE transactions
-			SET amount = $1, category = $2, merchant_name = $3, date = $4, updated_at = NOW()
-			WHERE id = $5
+			SET amount = $1, primary_category = $2, detailed_category = $3, merchant_name = $4, date = $5, payment_channel = $6, personal_finance_category_icon_url = $7, updated_at = NOW()
+			WHERE id = $8
 		`
-		_, err = pool.Exec(r.Context(), updateQuery, req.Amount, req.Category, req.MerchantName, req.Date, transactionID)
+		_, err = pool.Exec(r.Context(), updateQuery, req.Amount, req.PrimaryCategory, req.DetailedCategory, req.MerchantName, req.Date, req.PaymentChannel, req.PersonalFinanceCategoryIconURL, transactionID)
 		if err != nil {
 			log.Printf("ERROR: Failed to update transaction - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
 			http.Error(w, "failed to update transaction", http.StatusInternalServerError)
@@ -599,5 +607,46 @@ func FireSandboxWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.H
 		log.Printf("INFO: Fired sandbox webhook for item_id %s, webhook_code %s", req.ItemID, req.WebhookCode)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": "webhook fired"})
+	}
+}
+
+func UpdateItemWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ItemID     string `json:"item_id"`
+			WebhookURL string `json:"webhook_url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode update webhook request body: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if req.WebhookURL == "" {
+			http.Error(w, "webhook_url is required", http.StatusBadRequest)
+			return
+		}
+
+		// Look up the access token for the given item_id
+		var accessToken string
+		err := pool.QueryRow(r.Context(), "SELECT access_token FROM plaid_items WHERE item_id = $1", req.ItemID).Scan(&accessToken)
+		if err != nil {
+			log.Printf("ERROR: Failed to find access token for item_id %s: %v", req.ItemID, err)
+			http.Error(w, "item not found", http.StatusNotFound)
+			return
+		}
+
+		request := plaid.NewItemWebhookUpdateRequest(accessToken)
+		request.SetWebhook(req.WebhookURL)
+		_, _, err = plaidClient.PlaidApi.ItemWebhookUpdate(r.Context()).ItemWebhookUpdateRequest(*request).Execute()
+		if err != nil {
+			log.Printf("ERROR: Failed to update webhook for item_id %s: %v", req.ItemID, err)
+			http.Error(w, "failed to update webhook", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: Updated webhook for item_id %s to %s", req.ItemID, req.WebhookURL)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "webhook updated"})
 	}
 }

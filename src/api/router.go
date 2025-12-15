@@ -24,6 +24,7 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 		r.Post("/plaid/webhook", handlers.PlaidWebhook(plaidClient, pool))
 		if plaidEnv == "sandbox" {
 			r.Post("/plaid/sandbox/fire_webhook", handlers.FireSandboxWebhook(plaidClient, pool))
+			r.Post("/item/webhook/update", handlers.UpdateItemWebhook(plaidClient, pool))
 		}
 
 		// Protected routes

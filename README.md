@@ -10,7 +10,6 @@ docker compose up -d     # recreate empty DB
 
 # URGENT
  Add filter for income vs expense
- Find out why categories are all "Other"
  add savings/cash flow label on bar graph 
  SORT TRANSACTIONS BY DATE
 

@@ -62,8 +62,8 @@ func GetAccountsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemI
 func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, accountID string) ([]models.Transaction, error) {
 	query := `
 		SELECT 
-			t.id, t.account_id, t.transaction_id, t.plaid_category_id, t.category, t.type, t.name, t.merchant_name,
-			t.amount, t.currency, t.date, t.pending, t.account_owner, t.created_at, t.updated_at
+			t.id, t.account_id, t.transaction_id, t.primary_category, t.detailed_category, t.payment_channel, t.type, t.name, t.merchant_name,
+			t.amount, t.currency, t.date, t.pending, t.account_owner, t.personal_finance_category_icon_url, t.created_at, t.updated_at
 		FROM transactions t
 		JOIN accounts a ON t.account_id = a.id
 		JOIN plaid_items p ON a.item_id = p.id
@@ -83,8 +83,9 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 			&transaction.ID,
 			&transaction.AccountID,
 			&transaction.TransactionID,
-			&transaction.PlaidCategoryID,
-			&transaction.Category,
+			&transaction.PrimaryCategory,
+			&transaction.DetailedCategory,
+			&transaction.PaymentChannel,
 			&transaction.Type,
 			&transaction.Name,
 			&transaction.MerchantName,
@@ -93,6 +94,7 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 			&transaction.Date,
 			&transaction.Pending,
 			&transaction.AccountOwner,
+			&transaction.PersonalFinanceCategoryIconURL,
 			&transaction.CreatedAt,
 			&transaction.UpdatedAt,
 		)
@@ -108,17 +110,21 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, transactions []plaid.Transaction) error {
 	for _, txn := range transactions {
 		query := `
-			INSERT INTO transactions (account_id, transaction_id, amount, name, date, category, pending, type, merchant_name, currency, account_owner, created_at)
-			SELECT a.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
-			FROM accounts a
-			JOIN plaid_items p ON a.item_id = p.id
-			WHERE p.user_id = $12 AND a.account_id = $1
-			ON CONFLICT (transaction_id) DO NOTHING
-		`
+            INSERT INTO transactions (account_id, transaction_id, amount, name, date, primary_category, detailed_category, payment_channel, pending, type, merchant_name, currency, account_owner, personal_finance_category_icon_url, created_at)
+            SELECT a.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
+            FROM accounts a
+            JOIN plaid_items p ON a.item_id = p.id
+            WHERE p.user_id = $15 AND a.account_id = $1
+            ON CONFLICT (transaction_id) DO NOTHING
+        `
 
-		category := ""
+		primaryCategory := ""
+		detailedCategory := ""
+		iconURL := ""
 		if txn.PersonalFinanceCategory.IsSet() {
-			category = txn.GetPersonalFinanceCategory().Primary
+			primaryCategory = txn.GetPersonalFinanceCategory().Primary
+			detailedCategory = txn.GetPersonalFinanceCategory().Detailed
+			iconURL = txn.GetPersonalFinanceCategoryIconUrl()
 		}
 
 		_, err := pool.Exec(ctx, query,
@@ -127,13 +133,16 @@ func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, tra
 			txn.GetAmount(),          // $3
 			txn.GetName(),            // $4
 			txn.GetDate(),            // $5
-			category,                 // $6
-			txn.GetPending(),         // $7
-			txn.GetTransactionType(), // $8
-			txn.GetMerchantName(),    // $9
-			txn.GetIsoCurrencyCode(), // $10
-			txn.GetAccountOwner(),    // $11
-			userID,                   // $12
+			primaryCategory,          // $6
+			detailedCategory,         // $7
+			txn.GetPaymentChannel(),  // $8
+			txn.GetPending(),         // $9
+			txn.GetTransactionType(), // $10
+			txn.GetMerchantName(),    // $11
+			txn.GetIsoCurrencyCode(), // $12
+			txn.GetAccountOwner(),    // $13
+			iconURL,                  // $14
+			userID,                   // $15
 		)
 		if err != nil {
 			return err
@@ -147,30 +156,37 @@ func UpdateTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, t
 	for _, txn := range transactions {
 		query := `
 			UPDATE transactions
-			SET amount = $1, name = $2, date = $3, category = $4, pending = $5, merchant_name = $6, currency = $7, account_owner = $8, updated_at = NOW()
-			WHERE transaction_id = $9 AND account_id IN (
+			SET amount = $1, name = $2, date = $3, primary_category = $4, detailed_category = $5, payment_channel = $6, pending = $7, merchant_name = $8, currency = $9, account_owner = $10, personal_finance_category_icon_url = $11, updated_at = NOW()
+			WHERE transaction_id = $12 AND account_id IN (
 				SELECT a.id FROM accounts a
 				JOIN plaid_items p ON a.item_id = p.id
-				WHERE p.user_id = $10
+				WHERE p.user_id = $13
 			)
 		`
 
-		category := ""
+		primaryCategory := ""
+		detailedCategory := ""
+		iconURL := ""
 		if txn.PersonalFinanceCategory.IsSet() {
-			category = txn.GetPersonalFinanceCategory().Primary
+			primaryCategory = txn.GetPersonalFinanceCategory().Primary
+			detailedCategory = txn.GetPersonalFinanceCategory().Detailed
+			iconURL = txn.GetPersonalFinanceCategoryIconUrl()
 		}
 
 		_, err := pool.Exec(ctx, query,
 			txn.GetAmount(),          // $1
 			txn.GetName(),            // $2
 			txn.GetDate(),            // $3
-			category,                 // $4
-			txn.GetPending(),         // $5
-			txn.GetMerchantName(),    // $6
-			txn.GetIsoCurrencyCode(), // $7
-			txn.GetAccountOwner(),    // $8
-			txn.GetTransactionId(),   // $9
-			userID,                   // $10
+			primaryCategory,          // $4
+			detailedCategory,         // $5
+			txn.GetPaymentChannel(),  // $6
+			txn.GetPending(),         // $7
+			txn.GetMerchantName(),    // $8
+			txn.GetIsoCurrencyCode(), // $9
+			txn.GetAccountOwner(),    // $10
+			iconURL,                  // $11
+			txn.GetTransactionId(),   // $12
+			userID,                   // $13
 		)
 		if err != nil {
 			return err
