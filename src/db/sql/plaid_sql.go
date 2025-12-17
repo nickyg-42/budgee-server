@@ -114,10 +114,10 @@ func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, tra
 	for _, txn := range transactions {
 		query := `
 				INSERT INTO transactions (account_id, transaction_id, amount, name, date, primary_category, detailed_category, payment_channel, pending, expense, type, merchant_name, currency, account_owner, personal_finance_category_icon_url, created_at)
-				SELECT a.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW()
+				SELECT a.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()
 				FROM accounts a
 				JOIN plaid_items p ON a.item_id = p.id
-				WHERE p.user_id = $17 AND a.account_id = $1
+				WHERE p.user_id = $16 AND a.account_id = $1
 				ON CONFLICT (transaction_id) DO NOTHING
 			`
 
@@ -152,7 +152,7 @@ func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, tra
 			txn.GetIsoCurrencyCode(), // $13
 			txn.GetAccountOwner(),    // $14
 			iconURL,                  // $15
-			userID,                   // $17
+			userID,                   // $16
 		)
 		if err != nil {
 			return err
