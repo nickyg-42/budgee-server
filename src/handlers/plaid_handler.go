@@ -573,6 +573,13 @@ func TriggerTransactionSyncFromWebhook(plaidClient *plaid.APIClient, pool *pgxpo
 	} else {
 		log.Printf("INFO: From Webhook: Successfully synced transactions for item %s", itemID)
 	}
+
+	err = db.RecategorizeTransactions(context.Background(), pool)
+	if err != nil {
+		log.Printf("ERROR: From Webhook: Failed to recategorize transactions after sync for item %s: %v", itemID, err)
+	} else {
+		log.Printf("INFO: From Webhook: Successfully recategorized transactions after sync for item %s", itemID)
+	}
 }
 
 func FireSandboxWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {

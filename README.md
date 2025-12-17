@@ -7,17 +7,9 @@ create a new migration: migrate create -ext sql -dir src/db/migrations -seq <mig
 docker compose down -v   # removes DB + volume
 docker compose up -d     # recreate empty DB
 
-
-# URGENT
- Add filter for income vs expense
  add savings/cash flow label on bar graph 
- SORT TRANSACTIONS BY DATE
 
-# LESS IMPORTANT
-make expenses show upside down on the graph
-Better and deeper insights, possibly AI powered.
-show year and/or day metrics
-Some transactions are categorized properly, some arent?!
-![alt text](image-1.png)
-
-# TODO : rely on github secrets instead of .env?
+# TODO
+- make expenses show upside down on the graph
+- Better and deeper insights, possibly AI powered.
+- show year and/or day metrics

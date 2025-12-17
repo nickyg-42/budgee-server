@@ -2,7 +2,38 @@ package util
 
 import (
 	"regexp"
+	"strings"
 )
+
+// IsExpense determines if a transaction is a true expense, excluding transfers and credit card payments.
+func IsExpense(accountType string, amount float64, categoryPrimary string) bool {
+	// Exclude these primary categories
+	exclude := map[string]struct{}{
+		"TRANSFER":             {},
+		"LOAN_PAYMENTS":        {},
+		"CREDIT_CARD_PAYMENTS": {},
+		"TRANSFER_OUT":         {},
+	}
+	// Only treat positive amounts as expenses (outflow)
+	if amount <= 0 {
+		return false
+	}
+	// Normalize category
+	cat := strings.ToUpper(categoryPrimary)
+	if _, found := exclude[cat]; found {
+		return false
+	}
+	// Credit account: only purchases (not payments/credits)
+	if accountType == "credit" {
+		return true
+	}
+	// Depository: exclude transfers/payments
+	if accountType == "depository" {
+		return true
+	}
+	// Other account types: not counted as expenses
+	return false
+}
 
 func ValidateEmail(email string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
