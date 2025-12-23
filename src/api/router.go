@@ -29,11 +29,13 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 
 		// Protected routes
 		r.With(middleware.JWTAuthMiddleware).Group(func(r chi.Router) {
+			// User
 			r.Get("/user/{user_id}", handlers.GetUser(pool))
 			r.Put("/user", handlers.UpdateUser(pool))
 			r.Post("/user/change-password", handlers.ChangePassword(pool))
 			r.Delete("/user", handlers.DeleteUser(pool))
 
+			// Plaid
 			r.Post("/plaid/create-link-token", handlers.CreateLinkToken(plaidClient, pool))
 			r.Post("/plaid/exchange-public-token", handlers.ExchangePublicToken(plaidClient, pool))
 			r.Get("/plaid/items", handlers.GetPlaidItemsFromDB(pool))
@@ -44,6 +46,14 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 			r.Delete("/plaid/items/{item_id}", handlers.DeletePlaidItem(plaidClient, pool))
 			r.Put("/plaid/transactions/{transaction_id}", handlers.UpdateTransaction(pool))
 			r.Delete("/plaid/transactions/{transaction_id}", handlers.DeleteTransaction(pool))
+
+			// Budget
+			r.Post("/budgets", handlers.CreateBudget(pool))
+			r.Get("/budgets", handlers.GetAllBudgetsForUser(pool))
+			r.Get("/budgets/{budget_id}", handlers.GetBudgetByID(pool))
+			r.Get("/budgets/category/{category}", handlers.GetBudgetByCategory(pool))
+			r.Put("/budgets/{budget_id}", handlers.UpdateBudget(pool))
+			r.Delete("/budgets/{budget_id}", handlers.DeleteBudget(pool))
 		})
 	})
 

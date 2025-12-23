@@ -8,8 +8,3 @@ docker compose down -v   # removes DB + volume
 docker compose up -d     # recreate empty DB
 
  add savings/cash flow label on bar graph 
-
-# TODO
-- make expenses show upside down on the graph
-- Better and deeper insights, possibly AI powered.
-- show year and/or day metrics
