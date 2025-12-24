@@ -43,6 +43,7 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 			r.Get("/plaid/accounts/{item_id}/db", handlers.GetAccountsFromDB(pool))
 			r.Get("/plaid/transactions/{item_id}/sync", handlers.SyncTransactions(plaidClient, pool))
 			r.Get("/plaid/transactions/{account_id}", handlers.GetTransactionsFromDB(pool))
+			r.Post("/plaid/transactions", handlers.CreateTransaction(pool))
 			r.Delete("/plaid/items/{item_id}", handlers.DeletePlaidItem(plaidClient, pool))
 			r.Put("/plaid/transactions/{transaction_id}", handlers.UpdateTransaction(pool))
 			r.Delete("/plaid/transactions/{transaction_id}", handlers.DeleteTransaction(pool))
@@ -54,6 +55,14 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 			r.Get("/budgets/category/{category}", handlers.GetBudgetByCategory(pool))
 			r.Put("/budgets/{budget_id}", handlers.UpdateBudget(pool))
 			r.Delete("/budgets/{budget_id}", handlers.DeleteBudget(pool))
+
+			// Transaction Rules
+			r.Post("/transaction-rules", handlers.CreateTransactionRule(pool))
+			r.Post("/transaction-rules/trigger", handlers.TriggerTransactionRules(pool))
+			r.Get("/transaction-rules", handlers.GetAllTransactionRules(pool))
+			r.Get("/transaction-rules/{rule_id}", handlers.GetTransactionRuleByID(pool))
+			r.Put("/transaction-rules/{rule_id}", handlers.UpdateTransactionRule(pool))
+			r.Delete("/transaction-rules/{rule_id}", handlers.DeleteTransactionRule(pool))
 		})
 	})
 

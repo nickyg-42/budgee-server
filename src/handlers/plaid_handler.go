@@ -304,6 +304,12 @@ func SyncTransactionsForItem(ctx context.Context, pool *pgxpool.Pool, plaidClien
 	log.Printf("INFO: Successfully synced transactions for user %d, item %d - Added: %d, Modified: %d, Removed: %d",
 		item.UserID, itemIDInt, len(allAdded), len(allModified), len(allRemoved))
 
+	// Apply transaction rules after syncing
+	err = db.ApplyTransactionRulesToUser(ctx, pool, item.UserID)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -655,5 +661,65 @@ func UpdateItemWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Ha
 		log.Printf("INFO: Updated webhook for item_id %s to %s", req.ItemID, req.WebhookURL)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": "webhook updated"})
+	}
+}
+
+func CreateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value("user_id").(int64)
+
+		var req struct {
+			AccountID        string  `json:"account_id"`
+			Amount           float64 `json:"amount"`
+			Date             string  `json:"date"`
+			Name             string  `json:"name"`
+			MerchantName     string  `json:"merchant_name"`
+			PrimaryCategory  string  `json:"primary_category"`
+			DetailedCategory string  `json:"detailed_category"`
+			PaymentChannel   string  `json:"payment_channel"`
+			Expense          bool    `json:"expense"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode create transaction request body: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		// Check that the account belongs to the user
+		query := `
+			SELECT a.id FROM accounts a
+			JOIN plaid_items p ON a.item_id = p.id
+			WHERE a.id = $1 AND p.user_id = $2
+		`
+		var accountID int64
+		err := pool.QueryRow(r.Context(), query, req.AccountID, userID).Scan(&accountID)
+		if err != nil {
+			log.Printf("ERROR: Account not found or forbidden for create transaction - account_id: %s, user_id: %d: %v", req.AccountID, userID, err)
+			http.Error(w, "account not found or forbidden", http.StatusForbidden)
+			return
+		}
+
+		txn, err := db.InsertTransaction(
+			r.Context(),
+			pool,
+			accountID,
+			req.Amount,
+			req.Date,
+			req.Name,
+			req.MerchantName,
+			req.PrimaryCategory,
+			req.DetailedCategory,
+			req.PaymentChannel,
+			req.Expense,
+		)
+		if err != nil {
+			log.Printf("ERROR: Failed to insert transaction: %v", err)
+			http.Error(w, "failed to create transaction", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(txn)
 	}
 }

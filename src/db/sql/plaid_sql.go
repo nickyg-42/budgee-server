@@ -387,3 +387,47 @@ func RecategorizeTransactions(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	return nil
 }
+
+func InsertTransaction(ctx context.Context, pool *pgxpool.Pool, accountID int64, amount float64, date, name, merchantName, primaryCategory, detailedCategory, paymentChannel string, expense bool) (models.Transaction, error) {
+	insertQuery := `
+		INSERT INTO transactions
+			(account_id, amount, date, name, merchant_name, primary_category, detailed_category, payment_channel, expense, created_at, updated_at)
+		VALUES
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+		RETURNING id, account_id, transaction_id, primary_category, detailed_category, payment_channel, type, name, merchant_name, amount, currency, date, pending, expense, account_owner, personal_finance_category_icon_url, created_at, updated_at
+	`
+	var txn models.Transaction
+	err := pool.QueryRow(
+		ctx,
+		insertQuery,
+		accountID,
+		amount,
+		date,
+		name,
+		merchantName,
+		primaryCategory,
+		detailedCategory,
+		paymentChannel,
+		expense,
+	).Scan(
+		&txn.ID,
+		&txn.AccountID,
+		&txn.TransactionID,
+		&txn.PrimaryCategory,
+		&txn.DetailedCategory,
+		&txn.PaymentChannel,
+		&txn.Type,
+		&txn.Name,
+		&txn.MerchantName,
+		&txn.Amount,
+		&txn.Currency,
+		&txn.Date,
+		&txn.Pending,
+		&txn.Expense,
+		&txn.AccountOwner,
+		&txn.PersonalFinanceCategoryIconURL,
+		&txn.CreatedAt,
+		&txn.UpdatedAt,
+	)
+	return txn, err
+}

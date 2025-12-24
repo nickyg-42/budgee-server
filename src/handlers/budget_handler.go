@@ -58,7 +58,6 @@ func GetBudgetByID(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "budget not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("INFO: Retrieved budget id %d for user %d", budgetID, userID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(budget)
 	}
@@ -74,7 +73,6 @@ func GetBudgetByCategory(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "budget not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("INFO: Retrieved budget for user %d, category %s", userID, category)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(budget)
 	}
@@ -89,7 +87,6 @@ func GetAllBudgetsForUser(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "failed to get budgets", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("INFO: Retrieved %d budgets for user %d", len(budgets), userID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(budgets)
 	}
