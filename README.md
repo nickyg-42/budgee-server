@@ -6,5 +6,3 @@ create a new migration: migrate create -ext sql -dir src/db/migrations -seq <mig
 
 docker compose down -v   # removes DB + volume
 docker compose up -d     # recreate empty DB
-
- add savings/cash flow label on bar graph 
