@@ -35,6 +35,36 @@ func IsExpense(accountType string, amount float64, categoryPrimary string) bool 
 	return false
 }
 
+// IsIncome determines if a transaction is true income, excluding transfers and similar inflows.
+func IsIncome(accountType string, amount float64, categoryPrimary string) bool {
+	// Exclude these primary categories
+	exclude := map[string]struct{}{
+		"TRANSFER":             {},
+		"LOAN_PAYMENTS":        {},
+		"CREDIT_CARD_PAYMENTS": {},
+		"TRANSFER_IN":          {},
+	}
+	// Only treat negative amounts as income (inflow)
+	if amount >= 0 {
+		return false
+	}
+	// Normalize category
+	cat := strings.ToUpper(categoryPrimary)
+	if _, found := exclude[cat]; found {
+		return false
+	}
+	// Credit account: only refunds/credits (not payments)
+	if accountType == "credit" {
+		return true
+	}
+	// Depository: exclude transfers/payments
+	if accountType == "depository" {
+		return true
+	}
+	// Other account types: not counted as income
+	return false
+}
+
 func ValidateEmail(email string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 	return re.MatchString(email)

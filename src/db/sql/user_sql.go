@@ -13,7 +13,7 @@ import (
 func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-		SELECT id, username, email, first_name, last_name, password_hash, created_at
+		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme
 		FROM users 
 		WHERE id = $1
 	`
@@ -25,6 +25,7 @@ func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 		&user.LastName,
 		&user.PasswordHash,
 		&user.CreatedAt,
+		&user.Theme,
 	)
 
 	if err != nil {
@@ -36,7 +37,7 @@ func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-        SELECT id, username, email, first_name, last_name, password_hash, created_at
+        SELECT id, username, email, first_name, last_name, password_hash, created_at, theme
         FROM users 
         WHERE username = $1
     `
@@ -48,6 +49,7 @@ func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error
 		&user.LastName,
 		&user.PasswordHash,
 		&user.CreatedAt,
+		&user.Theme,
 	)
 
 	if err != nil {
@@ -109,13 +111,13 @@ func DeleteUser(userID int, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func UpdateUserProfile(ctx context.Context, pool *pgxpool.Pool, userID int64, email string, firstName string, lastName string) error {
+func UpdateUserProfile(ctx context.Context, pool *pgxpool.Pool, userID int64, email string, firstName string, lastName string, theme string) error {
 	query := `
 		UPDATE users
-		SET email = $1, first_name = $2, last_name = $3, updated_at = NOW()
-		WHERE id = $4
+		SET email = $1, first_name = $2, last_name = $3, theme = $4, updated_at = NOW()
+		WHERE id = $5
 	`
-	_, err := pool.Exec(ctx, query, email, firstName, lastName, userID)
+	_, err := pool.Exec(ctx, query, email, firstName, lastName, theme, userID)
 	if err != nil {
 		return fmt.Errorf("failed to update user profile: %w", err)
 	}

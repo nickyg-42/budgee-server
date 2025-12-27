@@ -10,4 +10,5 @@ type User struct {
 	Email        string    `json:"email"`
 	PasswordHash []byte    `json:"password_hash"`
 	CreatedAt    time.Time `json:"created_at"`
+	Theme        string    `json:"theme"`
 }

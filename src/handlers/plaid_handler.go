@@ -623,6 +623,20 @@ func FireSandboxWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.H
 	}
 }
 
+func RecategorizeTransactions(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := db.RecategorizeTransactions(r.Context(), pool)
+		if err != nil {
+			log.Printf("ERROR: Failed to recategorize transactions: %v", err)
+			http.Error(w, "failed to recategorize transactions", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "transactions recategorized"})
+	}
+}
+
 func UpdateItemWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -687,17 +701,20 @@ func CreateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// Check that the account belongs to the user
 		query := `
-			SELECT a.id FROM accounts a
+			SELECT a.id, a.type FROM accounts a
 			JOIN plaid_items p ON a.item_id = p.id
 			WHERE a.id = $1 AND p.user_id = $2
 		`
 		var accountID int64
-		err := pool.QueryRow(r.Context(), query, req.AccountID, userID).Scan(&accountID)
+		var accountType string
+		err := pool.QueryRow(r.Context(), query, req.AccountID, userID).Scan(&accountID, &accountType)
 		if err != nil {
 			log.Printf("ERROR: Account not found or forbidden for create transaction - account_id: %s, user_id: %d: %v", req.AccountID, userID, err)
 			http.Error(w, "account not found or forbidden", http.StatusForbidden)
 			return
 		}
+
+		income := util.IsIncome(accountType, req.Amount, req.PrimaryCategory)
 
 		txn, err := db.InsertTransaction(
 			r.Context(),
@@ -717,6 +734,9 @@ func CreateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "failed to create transaction", http.StatusInternalServerError)
 			return
 		}
+
+		// Set the income field in the returned transaction
+		txn.Income = income
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

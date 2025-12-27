@@ -16,6 +16,7 @@ type Transaction struct {
 	Date                           time.Time `json:"date"`
 	Pending                        bool      `json:"pending"`
 	Expense                        bool      `json:"expense"`
+	Income                         bool      `json:"income"`
 	AccountOwner                   *string   `json:"account_owner"`
 	CreatedAt                      time.Time `json:"created_at"`
 	UpdatedAt                      time.Time `json:"updated_at"`

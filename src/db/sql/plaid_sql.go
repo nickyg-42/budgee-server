@@ -64,7 +64,7 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 	query := `
 		   SELECT 
 			   t.id, t.account_id, t.transaction_id, t.primary_category, t.detailed_category, t.payment_channel, t.type, t.name, t.merchant_name,
-			   t.amount, t.currency, t.date, t.pending, t.expense, t.account_owner, t.personal_finance_category_icon_url, t.created_at, t.updated_at
+			   t.amount, t.currency, t.date, t.pending, t.expense, t.income, t.account_owner, t.personal_finance_category_icon_url, t.created_at, t.updated_at
 		FROM transactions t
 		JOIN accounts a ON t.account_id = a.id
 		JOIN plaid_items p ON a.item_id = p.id
@@ -96,6 +96,7 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 			&transaction.Date,
 			&transaction.Pending,
 			&transaction.Expense,
+			&transaction.Income,
 			&transaction.AccountOwner,
 			&transaction.PersonalFinanceCategoryIconURL,
 			&transaction.CreatedAt,
@@ -113,11 +114,11 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, transactions []plaid.Transaction) error {
 	for _, txn := range transactions {
 		query := `
-				INSERT INTO transactions (account_id, transaction_id, amount, name, date, primary_category, detailed_category, payment_channel, pending, expense, type, merchant_name, currency, account_owner, personal_finance_category_icon_url, created_at)
-				SELECT a.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()
+				INSERT INTO transactions (account_id, transaction_id, amount, name, date, primary_category, detailed_category, payment_channel, pending, expense, income, type, merchant_name, currency, account_owner, personal_finance_category_icon_url, created_at)
+				SELECT a.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW()
 				FROM accounts a
 				JOIN plaid_items p ON a.item_id = p.id
-				WHERE p.user_id = $16 AND a.account_id = $1
+				WHERE p.user_id = $17 AND a.account_id = $1
 				ON CONFLICT (transaction_id) DO NOTHING
 			`
 
@@ -135,6 +136,7 @@ func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, tra
 			return err
 		}
 		expense := util.IsExpense(accountType, txn.GetAmount(), primaryCategory)
+		income := util.IsIncome(accountType, txn.GetAmount(), primaryCategory)
 
 		_, err = pool.Exec(ctx, query,
 			txn.GetAccountId(),       // $1
@@ -147,12 +149,13 @@ func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, tra
 			txn.GetPaymentChannel(),  // $8
 			txn.GetPending(),         // $9
 			expense,                  // $10
-			txn.GetTransactionType(), // $11
-			txn.GetMerchantName(),    // $12
-			txn.GetIsoCurrencyCode(), // $13
-			txn.GetAccountOwner(),    // $14
-			iconURL,                  // $15
-			userID,                   // $16
+			income,                   // $11
+			txn.GetTransactionType(), // $12
+			txn.GetMerchantName(),    // $13
+			txn.GetIsoCurrencyCode(), // $14
+			txn.GetAccountOwner(),    // $15
+			iconURL,                  // $16
+			userID,                   // $17
 		)
 		if err != nil {
 			return err
@@ -166,11 +169,11 @@ func UpdateTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, t
 	for _, txn := range transactions {
 		query := `
 			UPDATE transactions
-			SET amount = $1, name = $2, date = $3, primary_category = $4, detailed_category = $5, payment_channel = $6, pending = $7, merchant_name = $8, currency = $9, account_owner = $10, personal_finance_category_icon_url = $11, updated_at = NOW()
-			WHERE transaction_id = $12 AND account_id IN (
+			SET amount = $1, name = $2, date = $3, primary_category = $4, detailed_category = $5, payment_channel = $6, pending = $7, merchant_name = $8, currency = $9, account_owner = $10, personal_finance_category_icon_url = $11, expense = $12, income = $13, updated_at = NOW()
+			WHERE transaction_id = $14 AND account_id IN (
 				SELECT a.id FROM accounts a
 				JOIN plaid_items p ON a.item_id = p.id
-				WHERE p.user_id = $13
+				WHERE p.user_id = $15
 			)
 		`
 
@@ -183,7 +186,14 @@ func UpdateTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, t
 			iconURL = txn.GetPersonalFinanceCategoryIconUrl()
 		}
 
-		_, err := pool.Exec(ctx, query,
+		accountType, err := GetAccountTypeByAccountID(ctx, pool, txn.GetAccountId())
+		if err != nil {
+			return err
+		}
+		expense := util.IsExpense(accountType, txn.GetAmount(), primaryCategory)
+		income := util.IsIncome(accountType, txn.GetAmount(), primaryCategory)
+
+		_, err = pool.Exec(ctx, query,
 			txn.GetAmount(),          // $1
 			txn.GetName(),            // $2
 			txn.GetDate(),            // $3
@@ -195,8 +205,10 @@ func UpdateTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, t
 			txn.GetIsoCurrencyCode(), // $9
 			txn.GetAccountOwner(),    // $10
 			iconURL,                  // $11
-			txn.GetTransactionId(),   // $12
-			userID,                   // $13
+			expense,                  // $12
+			income,                   // $13
+			txn.GetTransactionId(),   // $14
+			userID,                   // $15
 		)
 		if err != nil {
 			return err
@@ -338,7 +350,7 @@ func GetAccountTypeByAccountID(ctx context.Context, pool *pgxpool.Pool, accountI
 // RecategorizeTransactions fetches all transactions, recalculates isExpense, and updates if needed.
 func RecategorizeTransactions(ctx context.Context, pool *pgxpool.Pool) error {
 	query := `
-    	SELECT t.id, t.amount, t.primary_category, t.expense, a.type
+    	SELECT t.id, t.amount, t.primary_category, t.expense, t.income, a.type
     	FROM transactions t
     	JOIN accounts a ON t.account_id = a.id
 	`
@@ -353,16 +365,18 @@ func RecategorizeTransactions(ctx context.Context, pool *pgxpool.Pool) error {
 		Amount          float64
 		PrimaryCategory *string
 		Expense         bool
+		Income          bool
 		AccountType     string
 	}
 
 	var toUpdate []struct {
 		ID      int
 		Expense bool
+		Income  bool
 	}
 	for rows.Next() {
 		var row txnRow
-		err := rows.Scan(&row.ID, &row.Amount, &row.PrimaryCategory, &row.Expense, &row.AccountType)
+		err := rows.Scan(&row.ID, &row.Amount, &row.PrimaryCategory, &row.Expense, &row.Income, &row.AccountType)
 		if err != nil {
 			return err
 		}
@@ -371,16 +385,18 @@ func RecategorizeTransactions(ctx context.Context, pool *pgxpool.Pool) error {
 			category = *row.PrimaryCategory
 		}
 		isExpense := util.IsExpense(row.AccountType, row.Amount, category)
-		if isExpense != row.Expense {
+		isIncome := util.IsIncome(row.AccountType, row.Amount, category)
+		if isExpense != row.Expense || isIncome != row.Income {
 			toUpdate = append(toUpdate, struct {
 				ID      int
 				Expense bool
-			}{row.ID, isExpense})
+				Income  bool
+			}{row.ID, isExpense, isIncome})
 		}
 	}
 	// Update only those that changed
 	for _, upd := range toUpdate {
-		_, err := pool.Exec(ctx, "UPDATE transactions SET expense = $1 WHERE id = $2", upd.Expense, upd.ID)
+		_, err := pool.Exec(ctx, "UPDATE transactions SET expense = $1, income = $2 WHERE id = $3", upd.Expense, upd.Income, upd.ID)
 		if err != nil {
 			return err
 		}
@@ -391,13 +407,21 @@ func RecategorizeTransactions(ctx context.Context, pool *pgxpool.Pool) error {
 func InsertTransaction(ctx context.Context, pool *pgxpool.Pool, accountID int64, amount float64, date, name, merchantName, primaryCategory, detailedCategory, paymentChannel string, expense bool) (models.Transaction, error) {
 	insertQuery := `
 		INSERT INTO transactions
-			(account_id, amount, date, name, merchant_name, primary_category, detailed_category, payment_channel, expense, created_at, updated_at)
+			(account_id, amount, date, name, merchant_name, primary_category, detailed_category, payment_channel, expense, income, created_at, updated_at)
 		VALUES
-			($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-		RETURNING id, account_id, transaction_id, primary_category, detailed_category, payment_channel, type, name, merchant_name, amount, currency, date, pending, expense, account_owner, personal_finance_category_icon_url, created_at, updated_at
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+		RETURNING id, account_id, transaction_id, primary_category, detailed_category, payment_channel, type, name, merchant_name, amount, currency, date, pending, expense, income, account_owner, personal_finance_category_icon_url, created_at, updated_at
 	`
 	var txn models.Transaction
-	err := pool.QueryRow(
+
+	// Determine income using util.IsIncome
+	accountType, err := GetAccountTypeByAccountID(ctx, pool, "")
+	if err != nil {
+		accountType = ""
+	}
+	income := util.IsIncome(accountType, amount, primaryCategory)
+
+	err = pool.QueryRow(
 		ctx,
 		insertQuery,
 		accountID,
@@ -409,6 +433,7 @@ func InsertTransaction(ctx context.Context, pool *pgxpool.Pool, accountID int64,
 		detailedCategory,
 		paymentChannel,
 		expense,
+		income,
 	).Scan(
 		&txn.ID,
 		&txn.AccountID,
@@ -424,6 +449,7 @@ func InsertTransaction(ctx context.Context, pool *pgxpool.Pool, accountID int64,
 		&txn.Date,
 		&txn.Pending,
 		&txn.Expense,
+		&txn.Income,
 		&txn.AccountOwner,
 		&txn.PersonalFinanceCategoryIconURL,
 		&txn.CreatedAt,

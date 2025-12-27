@@ -48,9 +48,10 @@ func UpdateUser(pool *pgxpool.Pool) http.HandlerFunc {
 		userID := r.Context().Value("user_id").(int64)
 
 		var req struct {
-			Email     string `json:"email"`
-			FirstName string `json:"first_name"`
-			LastName  string `json:"last_name"`
+			Email     *string `json:"email"`
+			FirstName *string `json:"first_name"`
+			LastName  *string `json:"last_name"`
+			Theme     *string `json:"theme"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			log.Printf("ERROR: Failed to decode update user request body: %v", err)
@@ -58,13 +59,52 @@ func UpdateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		if !util.ValidateEmail(req.Email) {
-			log.Printf("ERROR: Email validation failed during user update - Email: %s, User: %d", req.Email, userID)
+		// Validate email if provided
+		if req.Email != nil && *req.Email != "" && !util.ValidateEmail(*req.Email) {
+			log.Printf("ERROR: Email validation failed during user update - Email: %s, User: %d", *req.Email, userID)
 			http.Error(w, "invalid email format", http.StatusBadRequest)
 			return
 		}
 
-		err := db.UpdateUserProfile(r.Context(), pool, userID, req.Email, req.FirstName, req.LastName)
+		// Build dynamic update fields and args
+		fields := []string{}
+		args := []interface{}{}
+		argIdx := 1
+
+		if req.Email != nil {
+			fields = append(fields, "email = $"+strconv.Itoa(argIdx))
+			args = append(args, *req.Email)
+			argIdx++
+		}
+		if req.FirstName != nil {
+			fields = append(fields, "first_name = $"+strconv.Itoa(argIdx))
+			args = append(args, *req.FirstName)
+			argIdx++
+		}
+		if req.LastName != nil {
+			fields = append(fields, "last_name = $"+strconv.Itoa(argIdx))
+			args = append(args, *req.LastName)
+			argIdx++
+		}
+		if req.Theme != nil {
+			fields = append(fields, "theme = $"+strconv.Itoa(argIdx))
+			args = append(args, *req.Theme)
+			argIdx++
+		}
+
+		if len(fields) == 0 {
+			http.Error(w, "no fields to update", http.StatusBadRequest)
+			return
+		}
+
+		// Always update updated_at
+		fields = append(fields, "updated_at = NOW()")
+		query := "UPDATE users SET " +
+			(func() string { return stringJoin(fields, ", ") })() +
+			" WHERE id = $" + strconv.Itoa(argIdx)
+		args = append(args, userID)
+
+		_, err := pool.Exec(r.Context(), query, args...)
 		if err != nil {
 			log.Printf("ERROR: Failed to update user profile - user_id: %d: %v", userID, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -175,4 +215,16 @@ func DeleteUser(pool *pgxpool.Pool) http.HandlerFunc {
 			"redirect": "/register",
 		})
 	}
+}
+
+// Helper for joining strings (since strings.Join only works on []string)
+func stringJoin(arr []string, sep string) string {
+	if len(arr) == 0 {
+		return ""
+	}
+	out := arr[0]
+	for i := 1; i < len(arr); i++ {
+		out += sep + arr[i]
+	}
+	return out
 }
