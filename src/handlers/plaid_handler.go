@@ -586,6 +586,71 @@ func TriggerTransactionSyncFromWebhook(plaidClient *plaid.APIClient, pool *pgxpo
 	} else {
 		log.Printf("INFO: From Webhook: Successfully recategorized transactions after sync for item %s", itemID)
 	}
+	// After transaction sync and recategorization, update account balances
+	err = UpdateAccountBalances(context.Background(), plaidClient, pool, itemID)
+	if err != nil {
+		log.Printf("ERROR: From Webhook: Failed to update account balances for item %s: %v", itemID, err)
+	} else {
+		log.Printf("INFO: From Webhook: Successfully updated account balances for item %s", itemID)
+	}
+}
+
+// UpdateAccountBalances syncs account balances from Plaid to DB for the given itemID
+func UpdateAccountBalances(ctx context.Context, plaidClient *plaid.APIClient, pool *pgxpool.Pool, itemID string) error {
+	// 1. Get all accounts for the itemID from the DB
+	dbAccounts, err := db.GetAccountsSQL(ctx, pool, 0, itemID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Get all accounts for the itemID from Plaid
+	var accessToken string
+	err = pool.QueryRow(ctx, "SELECT access_token FROM plaid_items WHERE item_id = $1", itemID).Scan(&accessToken)
+	if err != nil {
+		return err
+	}
+	request := plaid.NewAccountsGetRequest(accessToken)
+	accountsResp, _, err := plaidClient.PlaidApi.AccountsGet(ctx).AccountsGetRequest(*request).Execute()
+	if err != nil {
+		return err
+	}
+	plaidAccounts := accountsResp.GetAccounts()
+
+	// 3. Compare balances and update DB if different
+	// Build a map of DB accounts by account_id
+	dbMap := make(map[string]*models.Account)
+	for i := range dbAccounts {
+		dbMap[dbAccounts[i].AccountID] = &dbAccounts[i]
+	}
+	for _, plaidAcc := range plaidAccounts {
+		accID := plaidAcc.GetAccountId()
+		dbAcc, found := dbMap[accID]
+		if !found {
+			continue // ignore accounts not in DB
+		}
+		// Convert Plaid balances to string for comparison
+		var plaidCurrentStr, plaidAvailableStr string
+		if plaidAcc.Balances.Current.IsSet() {
+			plaidCurrentStr = strconv.FormatFloat(plaidAcc.Balances.GetCurrent(), 'f', 2, 64)
+		}
+		if plaidAcc.Balances.Available.IsSet() {
+			plaidAvailableStr = strconv.FormatFloat(plaidAcc.Balances.GetAvailable(), 'f', 2, 64)
+		}
+		needsUpdate := false
+		if dbAcc.CurrentBalance != plaidCurrentStr {
+			needsUpdate = true
+		}
+		if dbAcc.AvailableBalance != plaidAvailableStr {
+			needsUpdate = true
+		}
+		if needsUpdate {
+			_, err := pool.Exec(ctx, "UPDATE accounts SET current_balance = $1, available_balance = $2 WHERE account_id = $3", plaidCurrentStr, plaidAvailableStr, accID)
+			if err != nil {
+				log.Printf("ERROR: Failed to update account balance for account_id %s: %v", accID, err)
+			}
+		}
+	}
+	return nil
 }
 
 func FireSandboxWebhook(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
