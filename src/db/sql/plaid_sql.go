@@ -32,7 +32,7 @@ func GetPlaidItemsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]
 	return items, rows.Err()
 }
 
-func GetAccountsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID string) ([]models.Account, error) {
+func GetAccountsForUserAndItemSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID string) ([]models.Account, error) {
 	query := `
 		SELECT a.id, a.item_id, a.account_id, a.name, a.official_name, a.mask, a.type, a.subtype, 
 		       COALESCE(a.current_balance, 0), COALESCE(a.available_balance, 0), a.created_at 
@@ -42,6 +42,34 @@ func GetAccountsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemI
 	`
 
 	rows, err := pool.Query(ctx, query, userID, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accounts []models.Account
+	for rows.Next() {
+		var account models.Account
+		err := rows.Scan(&account.ID, &account.ItemID, &account.AccountID, &account.Name, &account.OfficialName, &account.Mask, &account.Type, &account.Subtype, &account.CurrentBalance, &account.AvailableBalance, &account.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
+	}
+
+	return accounts, rows.Err()
+}
+
+func GetAccountsForItemSQL(ctx context.Context, pool *pgxpool.Pool, itemID string) ([]models.Account, error) {
+	query := `
+		SELECT a.id, a.item_id, a.account_id, a.name, a.official_name, a.mask, a.type, a.subtype, 
+		       COALESCE(a.current_balance, 0), COALESCE(a.available_balance, 0), a.created_at 
+		FROM accounts a
+		JOIN plaid_items p ON a.item_id = p.id
+		WHERE p.item_id = $1
+	`
+
+	rows, err := pool.Query(ctx, query, itemID)
 	if err != nil {
 		return nil, err
 	}

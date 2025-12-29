@@ -334,7 +334,7 @@ func GetAccountsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
 		userID := r.Context().Value("user_id").(int64)
 		itemID := chi.URLParam(r, "item_id")
 
-		accounts, err := db.GetAccountsSQL(r.Context(), pool, userID, itemID)
+		accounts, err := db.GetAccountsForUserAndItemSQL(r.Context(), pool, userID, itemID)
 		if err != nil {
 			http.Error(w, "Failed to retrieve accounts", http.StatusInternalServerError)
 			log.Printf("ERROR: Failed to get accounts for user %d, item %s: %v", userID, itemID, err)
@@ -598,7 +598,7 @@ func TriggerTransactionSyncFromWebhook(plaidClient *plaid.APIClient, pool *pgxpo
 // UpdateAccountBalances syncs account balances from Plaid to DB for the given itemID
 func UpdateAccountBalances(ctx context.Context, plaidClient *plaid.APIClient, pool *pgxpool.Pool, itemID string) error {
 	// 1. Get all accounts for the itemID from the DB
-	dbAccounts, err := db.GetAccountsSQL(ctx, pool, 0, itemID)
+	dbAccounts, err := db.GetAccountsForItemSQL(ctx, pool, itemID)
 	if err != nil {
 		return err
 	}
