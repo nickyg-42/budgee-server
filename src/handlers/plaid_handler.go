@@ -808,3 +808,84 @@ func CreateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 		json.NewEncoder(w).Encode(txn)
 	}
 }
+
+func UpdateAllItemWebhooks(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			WebhookURL string `json:"webhook_url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode update all webhooks request body: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if req.WebhookURL == "" {
+			http.Error(w, "webhook_url is required", http.StatusBadRequest)
+			return
+		}
+
+		// Get all plaid items from the database
+		rows, err := pool.Query(r.Context(), "SELECT item_id, access_token FROM plaid_items")
+		if err != nil {
+			log.Printf("ERROR: Failed to fetch plaid items: %v", err)
+			http.Error(w, "failed to fetch items", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		type itemInfo struct {
+			ItemID      string
+			AccessToken string
+		}
+
+		var items []itemInfo
+		for rows.Next() {
+			var item itemInfo
+			if err := rows.Scan(&item.ItemID, &item.AccessToken); err != nil {
+				log.Printf("ERROR: Failed to scan item row: %v", err)
+				continue
+			}
+			items = append(items, item)
+		}
+
+		if err := rows.Err(); err != nil {
+			log.Printf("ERROR: Error iterating plaid items: %v", err)
+			http.Error(w, "failed to fetch items", http.StatusInternalServerError)
+			return
+		}
+
+		// Update webhook for each item
+		successCount := 0
+		failureCount := 0
+		var errors []string
+
+		for _, item := range items {
+			request := plaid.NewItemWebhookUpdateRequest(item.AccessToken)
+			request.SetWebhook(req.WebhookURL)
+			_, _, err := plaidClient.PlaidApi.ItemWebhookUpdate(r.Context()).ItemWebhookUpdateRequest(*request).Execute()
+			if err != nil {
+				log.Printf("ERROR: Failed to update webhook for item_id %s: %v", item.ItemID, err)
+				errors = append(errors, item.ItemID)
+				failureCount++
+			} else {
+				log.Printf("INFO: Updated webhook for item_id %s to %s", item.ItemID, req.WebhookURL)
+				successCount++
+			}
+		}
+
+		response := map[string]interface{}{
+			"message":       "webhook update completed",
+			"total":         len(items),
+			"success_count": successCount,
+			"failure_count": failureCount,
+		}
+
+		if len(errors) > 0 {
+			response["failed_items"] = errors
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}
+}
