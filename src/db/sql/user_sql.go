@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,7 +14,7 @@ import (
 func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin
+		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin, last_login, locked
 		FROM users 
 		WHERE id = $1
 	`
@@ -27,6 +28,8 @@ func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 		&user.CreatedAt,
 		&user.Theme,
 		&user.SuperAdmin,
+		&user.LastLogin,
+		&user.Locked,
 	)
 
 	if err != nil {
@@ -38,7 +41,7 @@ func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-        SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin
+        SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin, last_login, locked
         FROM users 
         WHERE username = $1
     `
@@ -52,6 +55,8 @@ func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error
 		&user.CreatedAt,
 		&user.Theme,
 		&user.SuperAdmin,
+		&user.LastLogin,
+		&user.Locked,
 	)
 
 	if err != nil {
@@ -65,13 +70,15 @@ func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error
 
 func CreateUser(req models.RegisterRequest, hashedPassword string, pool *pgxpool.Pool) (*models.RegisterResponse, error) {
 	query := `
-		INSERT INTO users (first_name, last_name, username, email, password_hash)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO users (first_name, last_name, username, email, password_hash, last_login)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, super_admin
 	`
 
 	var userID int
 	var superAdmin bool
+
+	now := time.Now().UTC()
 
 	err := pool.QueryRow(
 		context.Background(),
@@ -81,6 +88,7 @@ func CreateUser(req models.RegisterRequest, hashedPassword string, pool *pgxpool
 		req.Username,
 		req.Email,
 		hashedPassword,
+		now,
 	).Scan(&userID, &superAdmin)
 
 	if err != nil {
@@ -88,12 +96,26 @@ func CreateUser(req models.RegisterRequest, hashedPassword string, pool *pgxpool
 	}
 
 	resp := models.RegisterResponse{
-		ID:       userID,
-		Email:    req.Email,
-		Username: req.Username,
+		ID:         userID,
+		Email:      req.Email,
+		Username:   req.Username,
+		SuperAdmin: superAdmin,
 	}
 
 	return &resp, nil
+}
+
+func UpdateUserLastLogin(pool *pgxpool.Pool, userID int64) error {
+	query := `
+		UPDATE users
+		SET last_login = $1
+		WHERE id = $2
+	`
+	_, err := pool.Exec(context.Background(), query, time.Now().UTC(), userID)
+	if err != nil {
+		return fmt.Errorf("failed to update last_login: %w", err)
+	}
+	return nil
 }
 
 func DeleteUser(userID int, pool *pgxpool.Pool) error {
@@ -142,7 +164,7 @@ func UpdateUserPassword(ctx context.Context, pool *pgxpool.Pool, userID int64, h
 
 func GetAllUsers(pool *pgxpool.Pool) ([]models.User, error) {
 	query := `
-		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin
+		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin, last_login, locked
 		FROM users
 		ORDER BY id
 	`
@@ -165,6 +187,8 @@ func GetAllUsers(pool *pgxpool.Pool) ([]models.User, error) {
 			&user.CreatedAt,
 			&user.Theme,
 			&user.SuperAdmin,
+			&user.LastLogin,
+			&user.Locked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan user: %w", err)
@@ -175,4 +199,22 @@ func GetAllUsers(pool *pgxpool.Pool) ([]models.User, error) {
 		return nil, fmt.Errorf("row error: %w", rows.Err())
 	}
 	return users, nil
+}
+
+func LockUser(ctx context.Context, pool *pgxpool.Pool, userID int64) error {
+	query := `UPDATE users SET locked = TRUE, updated_at = NOW() WHERE id = $1`
+	_, err := pool.Exec(ctx, query, userID)
+	if err != nil {
+		return fmt.Errorf("failed to lock user: %w", err)
+	}
+	return nil
+}
+
+func UnlockUser(ctx context.Context, pool *pgxpool.Pool, userID int64) error {
+	query := `UPDATE users SET locked = FALSE, updated_at = NOW() WHERE id = $1`
+	_, err := pool.Exec(ctx, query, userID)
+	if err != nil {
+		return fmt.Errorf("failed to unlock user: %w", err)
+	}
+	return nil
 }

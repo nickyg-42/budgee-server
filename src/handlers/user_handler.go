@@ -121,6 +121,108 @@ func UpdateUser(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
+func AdminUpdateUser(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestedUserID := chi.URLParam(r, "user_id")
+		userID, err := strconv.ParseInt(requestedUserID, 10, 64)
+		if err != nil {
+			log.Printf("ERROR: Failed to parse user_id from URL - user_id: %s: %v", requestedUserID, err)
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+
+		var req struct {
+			Email     *string `json:"email"`
+			FirstName *string `json:"first_name"`
+			LastName  *string `json:"last_name"`
+			Password  *string `json:"password"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("ERROR: Failed to decode update user request body: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		// Validate email if provided
+		if req.Email != nil && *req.Email != "" && !util.ValidateEmail(*req.Email) {
+			log.Printf("ERROR: Email validation failed during user update - Email: %s, User: %d", *req.Email, userID)
+			http.Error(w, "invalid email format", http.StatusBadRequest)
+			return
+		}
+
+		// Build dynamic update fields and args
+		fields := []string{}
+		args := []interface{}{}
+		argIdx := 1
+
+		if req.Email != nil {
+			if !util.ValidateEmail(*req.Email) {
+				log.Printf("ERROR: Email validation failed during user update - Email: %s, User: %d", *req.Email, userID)
+				http.Error(w, "invalid email format", http.StatusBadRequest)
+				return
+			}
+			fields = append(fields, "email = $"+strconv.Itoa(argIdx))
+			args = append(args, *req.Email)
+			argIdx++
+		}
+		if req.FirstName != nil {
+			fields = append(fields, "first_name = $"+strconv.Itoa(argIdx))
+			args = append(args, *req.FirstName)
+			argIdx++
+		}
+		if req.LastName != nil {
+			fields = append(fields, "last_name = $"+strconv.Itoa(argIdx))
+			args = append(args, *req.LastName)
+			argIdx++
+		}
+		if req.Password != nil {
+			if !util.ValidatePassword(*req.Password) {
+				log.Printf("ERROR: Password validation failed during admin change password - User: %d", userID)
+				http.Error(w, "password must be at least 8 characters with uppercase, lowercase, digit, and special character", http.StatusBadRequest)
+				return
+			}
+
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+			if err != nil {
+				log.Printf("ERROR: Failed to hash new password for user %d: %v", userID, err)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			fields = append(fields, "password_hash = $"+strconv.Itoa(argIdx))
+			args = append(args, hashedPassword)
+			argIdx++
+		}
+
+		if len(fields) == 0 {
+			http.Error(w, "no fields to update", http.StatusBadRequest)
+			return
+		}
+
+		// Always update updated_at
+		fields = append(fields, "updated_at = NOW()")
+		query := "UPDATE users SET " +
+			(func() string { return stringJoin(fields, ", ") })() +
+			" WHERE id = $" + strconv.Itoa(argIdx)
+		args = append(args, userID)
+
+		_, err = pool.Exec(r.Context(), query, args...)
+		if err != nil {
+			log.Printf("ERROR: Failed to admin update user profile - user_id: %d: %v", userID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: User profile updated by Admin - User: %d", userID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "profile updated successfully",
+		})
+	}
+}
+
 func ChangePassword(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value("user_id").(int64)
@@ -217,6 +319,36 @@ func DeleteUser(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
+func AdminDeleteUser(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestedUserID := chi.URLParam(r, "user_id")
+		userID, err := strconv.ParseInt(requestedUserID, 10, 64)
+		if err != nil {
+			log.Printf("ERROR: Failed to parse user_id from URL - user_id: %s: %v", requestedUserID, err)
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("INFO: Admin DeleteUser called for user_id: %d", userID)
+
+		log.Printf("INFO: Deleting user %d and all associated data", userID)
+		err = db.DeleteUser(int(userID), pool)
+		if err != nil {
+			log.Printf("ERROR: Failed to admin delete user %d: %v", userID, err)
+			http.Error(w, "failed to admin delete user", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: User %d deleted successfully from admin dashboard", userID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message":  "user deleted",
+			"redirect": "/register",
+		})
+	}
+}
+
 func GetAllUsers(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		users, err := db.GetAllUsers(pool)
@@ -227,6 +359,58 @@ func GetAllUsers(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(users)
+	}
+}
+
+func LockUser(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestedUserID := chi.URLParam(r, "user_id")
+		userID, err := strconv.ParseInt(requestedUserID, 10, 64)
+		if err != nil {
+			log.Printf("ERROR: Failed to parse user_id from URL - user_id: %s: %v", requestedUserID, err)
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+
+		err = db.LockUser(r.Context(), pool, userID)
+		if err != nil {
+			log.Printf("ERROR: Failed to lock user %d: %v", userID, err)
+			http.Error(w, "failed to lock user", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: User %d locked successfully.", userID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "user locked",
+		})
+	}
+}
+
+func UnlockUser(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestedUserID := chi.URLParam(r, "user_id")
+		userID, err := strconv.ParseInt(requestedUserID, 10, 64)
+		if err != nil {
+			log.Printf("ERROR: Failed to parse user_id from URL - user_id: %s: %v", requestedUserID, err)
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+
+		err = db.UnlockUser(r.Context(), pool, userID)
+		if err != nil {
+			log.Printf("ERROR: Failed to unlock user %d: %v", userID, err)
+			http.Error(w, "failed to unlock user", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("INFO: User %d unlocked successfully.", userID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "user unlocked",
+		})
 	}
 }
 

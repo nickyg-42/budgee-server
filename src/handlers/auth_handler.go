@@ -28,11 +28,16 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 		req.Email = strings.TrimSpace(req.Email)
 		req.Username = strings.TrimSpace(req.Username)
 
-		// Gmail whitelist check
-		allowedGmails := strings.Split(os.Getenv("ALLOWED_GMAILS"), ",")
+		// Whitelist check using whitelisted_emails table
+		whitelist, err := db.GetAllWhitelistedEmails(r.Context(), pool)
+		if err != nil {
+			log.Printf("ERROR: Failed to fetch whitelisted emails: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		emailAllowed := false
-		for _, allowed := range allowedGmails {
-			if strings.EqualFold(strings.TrimSpace(allowed), req.Email) {
+		for _, entry := range whitelist {
+			if strings.EqualFold(strings.TrimSpace(entry.Email), req.Email) {
 				emailAllowed = true
 				break
 			}
@@ -86,9 +91,10 @@ func Register(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// Generate JWT token for the new user
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"user_id":  resp.ID,
-			"username": resp.Username,
-			"exp":      time.Now().Add(time.Hour * 504).Unix(),
+			"user_id":     resp.ID,
+			"username":    resp.Username,
+			"super_admin": resp.SuperAdmin,
+			"exp":         time.Now().Add(time.Hour * 168).Unix(),
 		})
 
 		tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
@@ -128,6 +134,12 @@ func Login(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		if user.Locked {
+			log.Printf("ERROR: Locked user attempted login - Username: %s", credentials.Username)
+			http.Error(w, "User account is locked", http.StatusForbidden)
+			return
+		}
+
 		if err := bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(credentials.Password)); err != nil {
 			log.Printf("ERROR: Invalid password attempt for user %s from IP %s",
 				credentials.Username, r.RemoteAddr)
@@ -140,7 +152,7 @@ func Login(pool *pgxpool.Pool) http.HandlerFunc {
 			"user_id":     user.ID,
 			"username":    user.Username,
 			"super_admin": user.SuperAdmin,
-			"exp":         time.Now().Add(time.Hour * 504).Unix(),
+			"exp":         time.Now().Add(time.Hour * 168).Unix(),
 		})
 
 		tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
@@ -149,6 +161,11 @@ func Login(pool *pgxpool.Pool) http.HandlerFunc {
 				user.Username, err)
 			http.Error(w, "Error generating token", http.StatusInternalServerError)
 			return
+		}
+
+		err = db.UpdateUserLastLogin(pool, user.ID)
+		if err != nil {
+			log.Printf("ERROR: Failed to update last_login for user %s: %v", user.Username, err)
 		}
 
 		log.Printf("INFO: Successful login - User: %s, ID: %d", user.Username, user.ID)

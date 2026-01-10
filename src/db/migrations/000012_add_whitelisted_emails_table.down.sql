@@ -1,0 +1,1 @@
+DROP TABLE whitelisted_emails;

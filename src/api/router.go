@@ -24,12 +24,10 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 		r.Post("/plaid/webhook", handlers.PlaidWebhook(plaidClient, pool))
 		if plaidEnv == "sandbox" {
 			r.Post("/plaid/sandbox/fire_webhook", handlers.FireSandboxWebhook(plaidClient, pool))
-			r.Post("/item/webhook/update", handlers.UpdateItemWebhook(plaidClient, pool))
-			r.Post("/plaid/transactions/sync", handlers.SyncTransactionsSandbox(plaidClient, pool))
 		}
 
 		// Protected routes
-		r.With(middleware.JWTAuthMiddleware).Group(func(r chi.Router) {
+		r.With(middleware.JWTAuthMiddleware(pool)).Group(func(r chi.Router) {
 			// User
 			r.Get("/user/{user_id}", handlers.GetUser(pool))
 			r.Put("/user", handlers.UpdateUser(pool))
@@ -39,11 +37,11 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 			// Plaid
 			r.Post("/plaid/create-link-token", handlers.CreateLinkToken(plaidClient, pool))
 			r.Post("/plaid/exchange-public-token", handlers.ExchangePublicToken(plaidClient, pool))
-			r.Get("/plaid/items", handlers.GetPlaidItemsFromDB(pool))
+			r.Get("/plaid/items", handlers.GetPlaidItemsSQL(pool))
 			r.Get("/plaid/accounts/{item_id}", handlers.GetPlaidAccounts(plaidClient, pool))
-			r.Get("/plaid/accounts/{item_id}/db", handlers.GetAccountsFromDB(pool))
+			r.Get("/plaid/accounts/{item_id}/db", handlers.GetAccountsSQL(pool))
 			r.Get("/plaid/transactions/{item_id}/sync", handlers.SyncTransactions(plaidClient, pool))
-			r.Get("/plaid/transactions/{account_id}", handlers.GetTransactionsFromDB(pool))
+			r.Get("/plaid/transactions/{account_id}", handlers.GetTransactionsSQL(pool))
 			r.Post("/plaid/transactions", handlers.CreateTransaction(pool))
 			r.Delete("/plaid/items/{item_id}", handlers.DeletePlaidItem(plaidClient, pool))
 			r.Put("/plaid/transactions/{transaction_id}", handlers.UpdateTransaction(pool))
@@ -67,10 +65,28 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 		})
 
 		// Super Admin Routes
-		r.With(middleware.JWTAuthMiddleware, middleware.SuperAdminMiddleware).Group(func(r chi.Router) {
+		r.With(middleware.JWTAuthMiddleware(pool), middleware.SuperAdminMiddleware).Group(func(r chi.Router) {
+			// User
 			r.Get("/admin/users", handlers.GetAllUsers(pool))
+			r.Put("/admin/user/{user_id}", handlers.AdminUpdateUser(pool))
+			r.Delete("/admin/user/{user_id}", handlers.AdminDeleteUser(pool))
+			r.Post("/admin/user/lock/{user_id}", handlers.LockUser(pool))
+			r.Post("/admin/user/unlock/{user_id}", handlers.UnlockUser(pool))
+
+			// Plaid
 			r.Post("/item/webhook/update-all", handlers.UpdateAllItemWebhooks(plaidClient, pool))
 			r.Post("/plaid/transactions/recategorize", handlers.RecategorizeTransactions(plaidClient, pool))
+			r.Post("/plaid/transactions/sync/{user_id}", handlers.SyncTransactionsForUser(plaidClient, pool))
+			r.Get("/plaid/items/all/db", handlers.GetAllPlaidItemsSQL(pool))
+			r.Delete("/admin/plaid/items/{item_id}", handlers.AdminDeletePlaidItem(plaidClient, pool))
+
+			// Cache
+			r.Post("/admin/cache/clear/{cache_name}", handlers.ClearCache(pool))
+
+			// Whitelisted Emails
+			r.Post("/admin/whitelisted-emails", handlers.CreateWhitelistedEmail(pool))
+			r.Get("/admin/whitelisted-emails", handlers.GetAllWhitelistedEmails(pool))
+			r.Delete("/admin/whitelisted-emails/{email_id}", handlers.DeleteWhitelistedEmail(pool))
 		})
 	})
 

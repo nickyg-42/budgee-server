@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -247,6 +248,51 @@ func SyncTransactions(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Han
 	}
 }
 
+func SyncTransactionsForUser(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestedUserID := chi.URLParam(r, "user_id")
+		userID, err := strconv.ParseInt(requestedUserID, 10, 64)
+		if err != nil {
+			log.Printf("ERROR: Failed to parse user_id from URL - user_id: %s: %v", requestedUserID, err)
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+
+		// Get all Plaid items for the user
+		items, err := db.GetPlaidItemsSQL(r.Context(), pool, userID)
+		if err != nil {
+			log.Printf("ERROR: Failed to get plaid items for user %d: %v", userID, err)
+			http.Error(w, "failed to get plaid items", http.StatusInternalServerError)
+			return
+		}
+
+		type syncResult struct {
+			ItemID  string `json:"item_id"`
+			Success bool   `json:"success"`
+			Error   string `json:"error,omitempty"`
+		}
+		var results []syncResult
+
+		for _, item := range items {
+			err := SyncTransactionsForItem(r.Context(), pool, plaidClient, &item)
+			res := syncResult{
+				ItemID:  item.ID,
+				Success: err == nil,
+			}
+			if err != nil {
+				res.Error = err.Error()
+				log.Printf("ERROR: Failed to sync transactions for user %d, item %s: %v", userID, item.ID, err)
+			}
+			results = append(results, res)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"results": results,
+		})
+	}
+}
+
 func SyncTransactionsForItem(ctx context.Context, pool *pgxpool.Pool, plaidClient *plaid.APIClient, item *models.PlaidItem) error {
 	itemIDInt, err := strconv.ParseInt(item.ID, 10, 64)
 	if err != nil {
@@ -313,7 +359,7 @@ func SyncTransactionsForItem(ctx context.Context, pool *pgxpool.Pool, plaidClien
 	return nil
 }
 
-func GetPlaidItemsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
+func GetPlaidItemsSQL(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value("user_id").(int64)
 
@@ -329,7 +375,21 @@ func GetPlaidItemsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-func GetAccountsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
+func GetAllPlaidItemsSQL(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		items, err := db.GetAllPlaidItems(r.Context(), pool)
+		if err != nil {
+			http.Error(w, "Failed to retrieve plaid items", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to get all plaid items: %v", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(items)
+	}
+}
+
+func GetAccountsSQL(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value("user_id").(int64)
 		itemID := chi.URLParam(r, "item_id")
@@ -346,7 +406,7 @@ func GetAccountsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-func GetTransactionsFromDB(pool *pgxpool.Pool) http.HandlerFunc {
+func GetTransactionsSQL(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value("user_id").(int64)
 		accountID := chi.URLParam(r, "account_id")
@@ -403,6 +463,48 @@ func DeletePlaidItem(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Hand
 		}
 
 		log.Printf("INFO: Plaid item deleted - User: %d, Item: %s", userID, itemID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "item deleted successfully",
+		})
+	}
+}
+
+func AdminDeletePlaidItem(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		itemID := chi.URLParam(r, "item_id")
+
+		// Fetch owner and access token
+		query := `SELECT user_id, access_token FROM plaid_items WHERE id = $1`
+		var ownerUserID int64
+		var accessToken string
+		err := pool.QueryRow(r.Context(), query, itemID).Scan(&ownerUserID, &accessToken)
+		if err != nil {
+			http.Error(w, "Item not found", http.StatusNotFound)
+			log.Printf("ERROR: Failed to find plaid item - item_id: %s: %v", itemID, err)
+			return
+		}
+
+		// Remove item from Plaid
+		request := plaid.NewItemRemoveRequest(accessToken)
+		_, _, err = plaidClient.PlaidApi.ItemRemove(r.Context()).ItemRemoveRequest(*request).Execute()
+		if err != nil {
+			http.Error(w, "Failed to remove item from Plaid", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to remove item from Plaid - item_id: %s, user_id: %d: %v", itemID, ownerUserID, err)
+			return
+		}
+
+		// Remove item from DB
+		err = db.DeletePlaidItem(r.Context(), pool, itemID, ownerUserID)
+		if err != nil {
+			http.Error(w, "Failed to delete plaid item", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to delete plaid item - item_id: %s, user_id: %d: %v", itemID, ownerUserID, err)
+			return
+		}
+
+		log.Printf("INFO: Plaid item deleted from admin dashboard - User: %d, Item: %s", ownerUserID, itemID)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -995,6 +1097,22 @@ func SyncTransactionsSandbox(plaidClient *plaid.APIClient, pool *pgxpool.Pool) h
 			"added":    len(allAdded),
 			"modified": len(allModified),
 			"removed":  len(allRemoved),
+		})
+	}
+}
+
+func ClearCache(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cacheName := chi.URLParam(r, "cache_name")
+		err := db.ClearCache(r.Context(), pool, cacheName)
+		if err != nil {
+			http.Error(w, "Failed to clear cache", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to clear cache %s: %v", cacheName, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": fmt.Sprintf("Cache %s cleared successfully", cacheName),
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	db "budgee-server/src/db/sql"
 	"context"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ParseTokenFromRequest extracts and validates JWT token from request, returning claims if valid
@@ -37,25 +39,37 @@ func ParseTokenFromRequest(r *http.Request) (jwt.MapClaims, error) {
 	return nil, fmt.Errorf("invalid token claims")
 }
 
-func JWTAuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims, err := ParseTokenFromRequest(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
-			return
-		}
+func JWTAuthMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, err := ParseTokenFromRequest(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnauthorized)
+				return
+			}
 
-		username := claims["username"].(string)
-		userID := int64(claims["user_id"].(float64))
-		superAdmin := claims["super_admin"].(bool)
+			username := claims["username"].(string)
+			userID := claims["user_id"].(float64)
+			superAdmin := false
+			if v, ok := claims["super_admin"].(bool); ok {
+				superAdmin = v
+			}
 
-		ctx := context.WithValue(r.Context(), "username", username)
-		ctx = context.WithValue(ctx, "user_id", userID)
-		ctx = context.WithValue(ctx, "super_admin", superAdmin)
+			// Check if user is locked
+			user, err := db.GetUserByID(int(userID), pool)
+			if err == nil && user.Locked {
+				http.Error(w, "user account is locked", http.StatusForbidden)
+				return
+			}
 
-		r = r.WithContext(ctx)
-		next.ServeHTTP(w, r)
-	})
+			ctx := context.WithValue(r.Context(), "username", username)
+			ctx = context.WithValue(ctx, "user_id", int64(userID))
+			ctx = context.WithValue(ctx, "super_admin", superAdmin)
+
+			r = r.WithContext(ctx)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func SuperAdminMiddleware(next http.Handler) http.Handler {

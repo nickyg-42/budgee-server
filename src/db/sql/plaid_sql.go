@@ -322,6 +322,7 @@ func SavePlaidItem(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID
 
 	_, err := pool.Exec(ctx, query, userID, itemID, accessToken, institutionID, institutionName, "active")
 	db.DelItemCache("items_user_" + fmt.Sprint(userID))
+	db.DelItemCache("items_all")
 	return err
 }
 
@@ -357,6 +358,7 @@ func UpdatePlaidItemInstitution(ctx context.Context, pool *pgxpool.Pool, userID 
 	query := `UPDATE plaid_items SET institution_id = $1, institution_name = $2, updated_at = NOW() WHERE user_id = $3 AND item_id IN (SELECT item_id FROM plaid_items WHERE user_id = $3 ORDER BY created_at DESC LIMIT 1)`
 	_, err := pool.Exec(ctx, query, institutionID, institutionName, userID)
 	db.DelItemCache("items_user_" + fmt.Sprint(userID))
+	db.DelItemCache("items_all")
 	return err
 }
 
@@ -367,6 +369,7 @@ func DeletePlaidItem(ctx context.Context, pool *pgxpool.Pool, itemID string, use
 		return fmt.Errorf("failed to delete plaid item: %w", err)
 	}
 	db.DelItemCache("items_user_" + fmt.Sprint(userID))
+	db.DelItemCache("items_all")
 	return nil
 }
 
@@ -547,4 +550,19 @@ func UpdateAccountBalance(ctx context.Context, pool *pgxpool.Pool, accountID, cu
 	_, err := pool.Exec(ctx, "UPDATE accounts SET current_balance = $1, available_balance = $2 WHERE account_id = $3", currentBalance, availableBalance, accountID)
 	db.DelAccountCache("accounts_item_" + fmt.Sprint(itemID))
 	return err
+}
+
+func ClearCache(ctx context.Context, pool *pgxpool.Pool, cacheName string) error {
+	switch cacheName {
+	case "items":
+		db.ClearAllItemCaches()
+	case "accounts":
+		db.ClearAllAccountCaches()
+	case "transactions":
+		db.ClearAllTransactionCaches()
+	default:
+		return fmt.Errorf("invalid cache name")
+	}
+
+	return nil
 }
