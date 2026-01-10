@@ -217,6 +217,19 @@ func DeleteUser(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
+func GetAllUsers(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		users, err := db.GetAllUsers(pool)
+		if err != nil {
+			log.Printf("ERROR: Failed to get all users: %v", err)
+			http.Error(w, "failed to get users", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(users)
+	}
+}
+
 // Helper for joining strings (since strings.Join only works on []string)
 func stringJoin(arr []string, sep string) string {
 	if len(arr) == 0 {

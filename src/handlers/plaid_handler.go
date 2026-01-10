@@ -395,7 +395,7 @@ func DeletePlaidItem(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.Hand
 		}
 
 		// Remove item from DB
-		err = db.DeletePlaidItem(r.Context(), pool, itemID)
+		err = db.DeletePlaidItem(r.Context(), pool, itemID, userID)
 		if err != nil {
 			http.Error(w, "Failed to delete plaid item", http.StatusInternalServerError)
 			log.Printf("ERROR: Failed to delete plaid item - item_id: %s, user_id: %d: %v", itemID, userID, err)
@@ -438,27 +438,32 @@ func UpdateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Check ownership using integer keys
+		// Check ownership and get account_id
 		query := `
-			SELECT t.id FROM transactions t
-			JOIN accounts a ON t.account_id = a.id
-			JOIN plaid_items p ON a.item_id = p.id
-			WHERE t.id = $1 AND p.user_id = $2
-		`
+            SELECT t.id, t.account_id FROM transactions t
+            JOIN accounts a ON t.account_id = a.id
+            JOIN plaid_items p ON a.item_id = p.id
+            WHERE t.id = $1 AND p.user_id = $2
+        `
 		var id int
-		err = pool.QueryRow(r.Context(), query, transactionID, userID).Scan(&id)
+		var accountID int64
+		err = pool.QueryRow(r.Context(), query, transactionID, userID).Scan(&id, &accountID)
 		if err != nil {
 			log.Printf("ERROR: Transaction not found or forbidden for update - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
 			http.Error(w, "transaction not found or forbidden", http.StatusForbidden)
 			return
 		}
 
-		updateQuery := `
-			UPDATE transactions
-			SET amount = $1, primary_category = $2, detailed_category = $3, merchant_name = $4, date = $5, payment_channel = $6, personal_finance_category_icon_url = $7, updated_at = NOW()
-			WHERE id = $8
-		`
-		_, err = pool.Exec(r.Context(), updateQuery, req.Amount, req.PrimaryCategory, req.DetailedCategory, req.MerchantName, req.Date, req.PaymentChannel, req.PersonalFinanceCategoryIconURL, transactionID)
+		updateReq := models.UpdateTransactionRequest{
+			Amount:                         req.Amount,
+			PrimaryCategory:                req.PrimaryCategory,
+			DetailedCategory:               req.DetailedCategory,
+			MerchantName:                   req.MerchantName,
+			Date:                           req.Date,
+			PaymentChannel:                 req.PaymentChannel,
+			PersonalFinanceCategoryIconURL: req.PersonalFinanceCategoryIconURL,
+		}
+		err = db.UpdateTransaction(r.Context(), pool, transactionID, updateReq, userID, accountID)
 		if err != nil {
 			log.Printf("ERROR: Failed to update transaction - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
 			http.Error(w, "failed to update transaction", http.StatusInternalServerError)
@@ -481,22 +486,23 @@ func DeleteTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Check ownership using integer keys
+		// Check ownership and get account_id
 		query := `
-			SELECT t.id FROM transactions t
-			JOIN accounts a ON t.account_id = a.id
-			JOIN plaid_items p ON a.item_id = p.id
-			WHERE t.id = $1 AND p.user_id = $2
-		`
+            SELECT t.id, t.account_id FROM transactions t
+            JOIN accounts a ON t.account_id = a.id
+            JOIN plaid_items p ON a.item_id = p.id
+            WHERE t.id = $1 AND p.user_id = $2
+        `
 		var id int
-		err = pool.QueryRow(r.Context(), query, transactionID, userID).Scan(&id)
+		var accountID int64
+		err = pool.QueryRow(r.Context(), query, transactionID, userID).Scan(&id, &accountID)
 		if err != nil {
 			log.Printf("ERROR: Transaction not found or forbidden for delete - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
 			http.Error(w, "transaction not found or forbidden", http.StatusForbidden)
 			return
 		}
 
-		_, err = pool.Exec(r.Context(), "DELETE FROM transactions WHERE id = $1", transactionID)
+		err = db.DeleteTransaction(r.Context(), pool, transactionID, userID, accountID)
 		if err != nil {
 			log.Printf("ERROR: Failed to delete transaction - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
 			http.Error(w, "failed to delete transaction", http.StatusInternalServerError)
@@ -644,7 +650,7 @@ func UpdateAccountBalances(ctx context.Context, plaidClient *plaid.APIClient, po
 			needsUpdate = true
 		}
 		if needsUpdate {
-			_, err := pool.Exec(ctx, "UPDATE accounts SET current_balance = $1, available_balance = $2 WHERE account_id = $3", plaidCurrentStr, plaidAvailableStr, accID)
+			err := db.UpdateAccountBalance(ctx, pool, accID, plaidCurrentStr, plaidAvailableStr, itemID)
 			if err != nil {
 				log.Printf("ERROR: Failed to update account balance for account_id %s: %v", accID, err)
 			}
@@ -887,5 +893,108 @@ func UpdateAllItemWebhooks(plaidClient *plaid.APIClient, pool *pgxpool.Pool) htt
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func SyncTransactionsSandbox(plaidClient *plaid.APIClient, pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ItemID string `json:"item_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			log.Printf("ERROR: Failed to decode item_id from request body: %v", err)
+			return
+		}
+
+		itemID := req.ItemID
+		if itemID == "" {
+			http.Error(w, "item_id is required", http.StatusBadRequest)
+			return
+		}
+
+		query := `SELECT id, access_token, user_id FROM plaid_items WHERE id = $1`
+		var dbItemID int64
+		var accessToken string
+		var userID int64
+		err := pool.QueryRow(r.Context(), query, itemID).Scan(&dbItemID, &accessToken, &userID)
+		if err != nil {
+			http.Error(w, "Access token not found", http.StatusNotFound)
+			log.Printf("ERROR: Failed to get access token for item %s: %v", itemID, err)
+			return
+		}
+
+		cursor, err := db.GetSyncCursor(r.Context(), pool, dbItemID)
+		if err != nil {
+			http.Error(w, "Failed to retrieve sync cursor", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to get sync cursor for item %d: %v", dbItemID, err)
+			return
+		}
+
+		hasMore := true
+		var allAdded []plaid.Transaction
+		var allModified []plaid.Transaction
+		var allRemoved []plaid.RemovedTransaction
+
+		for hasMore {
+			request := plaid.NewTransactionsSyncRequest(accessToken)
+			if cursor != "" {
+				request.SetCursor(cursor)
+			}
+
+			transactionsResp, _, err := plaidClient.PlaidApi.TransactionsSync(context.Background()).TransactionsSyncRequest(*request).Execute()
+			if err != nil {
+				http.Error(w, "Failed to fetch transactions", http.StatusInternalServerError)
+				log.Printf("ERROR: Failed to sync transactions for item %d: %v", dbItemID, err)
+				return
+			}
+
+			allAdded = append(allAdded, transactionsResp.GetAdded()...)
+			allModified = append(allModified, transactionsResp.GetModified()...)
+			allRemoved = append(allRemoved, transactionsResp.GetRemoved()...)
+
+			hasMore = transactionsResp.GetHasMore()
+			cursor = transactionsResp.GetNextCursor()
+		}
+
+		// Save added transactions
+		err = db.SaveTransactions(r.Context(), pool, userID, allAdded)
+		if err != nil {
+			http.Error(w, "Failed to save transactions", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to save transactions for item %d: %v", dbItemID, err)
+			return
+		}
+
+		// Update modified transactions
+		err = db.UpdateTransactions(r.Context(), pool, userID, allModified)
+		if err != nil {
+			http.Error(w, "Failed to update transactions", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to update transactions for item %d: %v", dbItemID, err)
+			return
+		}
+
+		// Remove deleted transactions
+		err = db.RemoveTransactions(r.Context(), pool, userID, allRemoved)
+		if err != nil {
+			http.Error(w, "Failed to remove transactions", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to remove transactions for item %d: %v", dbItemID, err)
+			return
+		}
+
+		err = db.UpdateSyncCursor(r.Context(), pool, dbItemID, cursor)
+		if err != nil {
+			http.Error(w, "Failed to update sync cursor", http.StatusInternalServerError)
+			log.Printf("ERROR: Failed to update sync cursor for item %d: %v", dbItemID, err)
+			return
+		}
+
+		log.Printf("INFO: Successfully synced transactions for item %d - Added: %d, Modified: %d, Removed: %d", dbItemID, len(allAdded), len(allModified), len(allRemoved))
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"added":    len(allAdded),
+			"modified": len(allModified),
+			"removed":  len(allRemoved),
+		})
 	}
 }

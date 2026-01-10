@@ -47,11 +47,24 @@ func JWTAuthMiddleware(next http.Handler) http.Handler {
 
 		username := claims["username"].(string)
 		userID := int64(claims["user_id"].(float64))
+		superAdmin := claims["super_admin"].(bool)
 
 		ctx := context.WithValue(r.Context(), "username", username)
 		ctx = context.WithValue(ctx, "user_id", userID)
+		ctx = context.WithValue(ctx, "super_admin", superAdmin)
 
 		r = r.WithContext(ctx)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func SuperAdminMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		superAdmin, ok := r.Context().Value("super_admin").(bool)
+		if !ok || !superAdmin {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"budgee-server/src/api"
 	"budgee-server/src/config"
+	"budgee-server/src/db"
 	sql "budgee-server/src/db"
 	plaidclient "budgee-server/src/plaid"
 	"log"
@@ -28,6 +29,9 @@ func main() {
 		log.Fatalf("DB connection failed: %v", err)
 	}
 	defer pool.Close()
+
+	// Initialize Cache
+	db.InitCache()
 
 	// Initialize Plaid Client
 	plaidClient := plaidclient.NewPlaidClient(cfg.PlaidClientID, cfg.PlaidSecret, cfg.PlaidEnvironment)

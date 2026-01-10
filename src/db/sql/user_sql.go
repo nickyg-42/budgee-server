@@ -13,7 +13,7 @@ import (
 func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme
+		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin
 		FROM users 
 		WHERE id = $1
 	`
@@ -26,6 +26,7 @@ func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 		&user.PasswordHash,
 		&user.CreatedAt,
 		&user.Theme,
+		&user.SuperAdmin,
 	)
 
 	if err != nil {
@@ -37,7 +38,7 @@ func GetUserByID(id int, pool *pgxpool.Pool) (*models.User, error) {
 func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error) {
 	var user models.User
 	query := `
-        SELECT id, username, email, first_name, last_name, password_hash, created_at, theme
+        SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin
         FROM users 
         WHERE username = $1
     `
@@ -50,6 +51,7 @@ func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error
 		&user.PasswordHash,
 		&user.CreatedAt,
 		&user.Theme,
+		&user.SuperAdmin,
 	)
 
 	if err != nil {
@@ -65,10 +67,11 @@ func CreateUser(req models.RegisterRequest, hashedPassword string, pool *pgxpool
 	query := `
 		INSERT INTO users (first_name, last_name, username, email, password_hash)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id
+		RETURNING id, super_admin
 	`
 
 	var userID int
+	var superAdmin bool
 
 	err := pool.QueryRow(
 		context.Background(),
@@ -78,7 +81,7 @@ func CreateUser(req models.RegisterRequest, hashedPassword string, pool *pgxpool
 		req.Username,
 		req.Email,
 		hashedPassword,
-	).Scan(&userID)
+	).Scan(&userID, &superAdmin)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
@@ -135,4 +138,41 @@ func UpdateUserPassword(ctx context.Context, pool *pgxpool.Pool, userID int64, h
 		return fmt.Errorf("failed to update user password: %w", err)
 	}
 	return nil
+}
+
+func GetAllUsers(pool *pgxpool.Pool) ([]models.User, error) {
+	query := `
+		SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin
+		FROM users
+		ORDER BY id
+	`
+	rows, err := pool.Query(context.Background(), query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var user models.User
+		err := rows.Scan(
+			&user.ID,
+			&user.Username,
+			&user.Email,
+			&user.FirstName,
+			&user.LastName,
+			&user.PasswordHash,
+			&user.CreatedAt,
+			&user.Theme,
+			&user.SuperAdmin,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, user)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("row error: %w", rows.Err())
+	}
+	return users, nil
 }

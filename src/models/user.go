@@ -11,4 +11,5 @@ type User struct {
 	PasswordHash []byte    `json:"password_hash"`
 	CreatedAt    time.Time `json:"created_at"`
 	Theme        string    `json:"theme"`
+	SuperAdmin   bool      `json:"super_admin"`
 }

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"budgee-server/src/db"
 	"budgee-server/src/models"
 	"budgee-server/src/util"
 	"context"
@@ -11,6 +12,11 @@ import (
 )
 
 func GetPlaidItemsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]models.PlaidItem, error) {
+	cacheKey := "items_user_" + fmt.Sprint(userID)
+	if val, found := db.Cache.Get(cacheKey); found {
+		return val.([]models.PlaidItem), nil
+	}
+
 	query := `SELECT id, user_id, access_token, item_id, institution_id, institution_name, created_at FROM plaid_items WHERE user_id = $1`
 
 	rows, err := pool.Query(ctx, query, userID)
@@ -29,10 +35,16 @@ func GetPlaidItemsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]
 		items = append(items, item)
 	}
 
+	db.SetItemCache(cacheKey, items)
 	return items, rows.Err()
 }
 
 func GetAccountsForUserAndItemSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID string) ([]models.Account, error) {
+	cacheKey := "accounts_item_user_" + fmt.Sprint(userID) + fmt.Sprint("_") + fmt.Sprint(itemID)
+	if val, found := db.Cache.Get(cacheKey); found {
+		return val.([]models.Account), nil
+	}
+
 	query := `
 		SELECT a.id, a.item_id, a.account_id, a.name, a.official_name, a.mask, a.type, a.subtype, 
 		       COALESCE(a.current_balance, 0), COALESCE(a.available_balance, 0), a.created_at 
@@ -57,10 +69,16 @@ func GetAccountsForUserAndItemSQL(ctx context.Context, pool *pgxpool.Pool, userI
 		accounts = append(accounts, account)
 	}
 
+	db.SetAccountCache(cacheKey, accounts)
 	return accounts, rows.Err()
 }
 
 func GetAccountsForItemSQL(ctx context.Context, pool *pgxpool.Pool, itemID string) ([]models.Account, error) {
+	cacheKey := "accounts_item_" + fmt.Sprint(itemID)
+	if val, found := db.Cache.Get(cacheKey); found {
+		return val.([]models.Account), nil
+	}
+
 	query := `
 		SELECT a.id, a.item_id, a.account_id, a.name, a.official_name, a.mask, a.type, a.subtype, 
 		       COALESCE(a.current_balance, 0), COALESCE(a.available_balance, 0), a.created_at 
@@ -85,10 +103,16 @@ func GetAccountsForItemSQL(ctx context.Context, pool *pgxpool.Pool, itemID strin
 		accounts = append(accounts, account)
 	}
 
+	db.SetAccountCache(cacheKey, accounts)
 	return accounts, rows.Err()
 }
 
 func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, accountID string) ([]models.Transaction, error) {
+	cacheKey := "transactions_account_user_" + fmt.Sprint(userID) + fmt.Sprint("_") + fmt.Sprint(accountID)
+	if val, found := db.Cache.Get(cacheKey); found {
+		return val.([]models.Transaction), nil
+	}
+
 	query := `
 		   SELECT 
 			   t.id, t.account_id, t.transaction_id, t.primary_category, t.detailed_category, t.payment_channel, t.type, t.name, t.merchant_name,
@@ -136,6 +160,7 @@ func GetTransactionsSQL(ctx context.Context, pool *pgxpool.Pool, userID int64, a
 		transactions = append(transactions, transaction)
 	}
 
+	db.SetTransactionCache(cacheKey, transactions)
 	return transactions, rows.Err()
 }
 
@@ -190,6 +215,7 @@ func SaveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, tra
 		}
 	}
 
+	db.ClearAllTransactionCaches()
 	return nil
 }
 
@@ -243,6 +269,7 @@ func UpdateTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, t
 		}
 	}
 
+	db.ClearAllTransactionCaches()
 	return nil
 }
 
@@ -266,6 +293,7 @@ func RemoveTransactions(ctx context.Context, pool *pgxpool.Pool, userID int64, r
 		}
 	}
 
+	db.ClearAllTransactionCaches()
 	return nil
 }
 
@@ -293,6 +321,7 @@ func SavePlaidItem(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID
 	`
 
 	_, err := pool.Exec(ctx, query, userID, itemID, accessToken, institutionID, institutionName, "active")
+	db.DelItemCache("items_user_" + fmt.Sprint(userID))
 	return err
 }
 
@@ -320,25 +349,33 @@ func SaveAccounts(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID 
 		}
 	}
 
+	db.DelAccountCache("accounts_item_user_" + fmt.Sprint(userID) + fmt.Sprint("_") + fmt.Sprint(itemID))
 	return nil
 }
 
 func UpdatePlaidItemInstitution(ctx context.Context, pool *pgxpool.Pool, userID int64, institutionID string, institutionName string) error {
 	query := `UPDATE plaid_items SET institution_id = $1, institution_name = $2, updated_at = NOW() WHERE user_id = $3 AND item_id IN (SELECT item_id FROM plaid_items WHERE user_id = $3 ORDER BY created_at DESC LIMIT 1)`
 	_, err := pool.Exec(ctx, query, institutionID, institutionName, userID)
+	db.DelItemCache("items_user_" + fmt.Sprint(userID))
 	return err
 }
 
-func DeletePlaidItem(ctx context.Context, pool *pgxpool.Pool, itemID string) error {
+func DeletePlaidItem(ctx context.Context, pool *pgxpool.Pool, itemID string, userID int64) error {
 	query := `DELETE FROM plaid_items WHERE id = $1`
 	_, err := pool.Exec(ctx, query, itemID)
 	if err != nil {
 		return fmt.Errorf("failed to delete plaid item: %w", err)
 	}
+	db.DelItemCache("items_user_" + fmt.Sprint(userID))
 	return nil
 }
 
 func GetAllPlaidItems(ctx context.Context, pool *pgxpool.Pool) ([]models.PlaidItem, error) {
+	cacheKey := "items_all"
+	if val, found := db.Cache.Get(cacheKey); found {
+		return val.([]models.PlaidItem), nil
+	}
+
 	query := `SELECT id, user_id, access_token, item_id, institution_id, institution_name, created_at FROM plaid_items`
 	rows, err := pool.Query(ctx, query)
 	if err != nil {
@@ -355,6 +392,7 @@ func GetAllPlaidItems(ctx context.Context, pool *pgxpool.Pool) ([]models.PlaidIt
 		}
 		items = append(items, item)
 	}
+	db.SetItemCache(cacheKey, items)
 	return items, rows.Err()
 }
 
@@ -429,9 +467,11 @@ func RecategorizeTransactions(ctx context.Context, pool *pgxpool.Pool) error {
 			return err
 		}
 	}
+	db.ClearAllTransactionCaches()
 	return nil
 }
 
+// Unused currently - add cache invalidation if ever used
 func InsertTransaction(ctx context.Context, pool *pgxpool.Pool, accountID int64, amount float64, date, name, merchantName, primaryCategory, detailedCategory, paymentChannel string, expense bool) (models.Transaction, error) {
 	insertQuery := `
 		INSERT INTO transactions
@@ -484,4 +524,27 @@ func InsertTransaction(ctx context.Context, pool *pgxpool.Pool, accountID int64,
 		&txn.UpdatedAt,
 	)
 	return txn, err
+}
+
+func UpdateTransaction(ctx context.Context, pool *pgxpool.Pool, transactionID int, req models.UpdateTransactionRequest, userID int64, accountID int64) error {
+	updateQuery := `
+		UPDATE transactions
+		SET amount = $1, primary_category = $2, detailed_category = $3, merchant_name = $4, date = $5, payment_channel = $6, personal_finance_category_icon_url = $7, updated_at = NOW()
+		WHERE id = $8
+	`
+	_, err := pool.Exec(ctx, updateQuery, req.Amount, req.PrimaryCategory, req.DetailedCategory, req.MerchantName, req.Date, req.PaymentChannel, req.PersonalFinanceCategoryIconURL, transactionID)
+	db.DelTransactionCache("transactions_account_user_" + fmt.Sprint(userID) + fmt.Sprint("_") + fmt.Sprint(accountID))
+	return err
+}
+
+func DeleteTransaction(ctx context.Context, pool *pgxpool.Pool, transactionID int, userID int64, accountID int64) error {
+	_, err := pool.Exec(ctx, "DELETE FROM transactions WHERE id = $1", transactionID)
+	db.DelTransactionCache("transactions_account_user_" + fmt.Sprint(userID) + fmt.Sprint("_") + fmt.Sprint(accountID))
+	return err
+}
+
+func UpdateAccountBalance(ctx context.Context, pool *pgxpool.Pool, accountID, currentBalance, availableBalance, itemID string) error {
+	_, err := pool.Exec(ctx, "UPDATE accounts SET current_balance = $1, available_balance = $2 WHERE account_id = $3", currentBalance, availableBalance, accountID)
+	db.DelAccountCache("accounts_item_" + fmt.Sprint(itemID))
+	return err
 }

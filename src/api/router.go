@@ -25,8 +25,7 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 		if plaidEnv == "sandbox" {
 			r.Post("/plaid/sandbox/fire_webhook", handlers.FireSandboxWebhook(plaidClient, pool))
 			r.Post("/item/webhook/update", handlers.UpdateItemWebhook(plaidClient, pool))
-			r.Post("/plaid/transactions/recategorize", handlers.RecategorizeTransactions(plaidClient, pool))
-			r.Post("/item/webhook/update-all", handlers.UpdateAllItemWebhooks(plaidClient, pool))
+			r.Post("/plaid/transactions/sync", handlers.SyncTransactionsSandbox(plaidClient, pool))
 		}
 
 		// Protected routes
@@ -65,6 +64,13 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 			r.Get("/transaction-rules/{rule_id}", handlers.GetTransactionRuleByID(pool))
 			r.Put("/transaction-rules/{rule_id}", handlers.UpdateTransactionRule(pool))
 			r.Delete("/transaction-rules/{rule_id}", handlers.DeleteTransactionRule(pool))
+		})
+
+		// Super Admin Routes
+		r.With(middleware.JWTAuthMiddleware, middleware.SuperAdminMiddleware).Group(func(r chi.Router) {
+			r.Get("/admin/users", handlers.GetAllUsers(pool))
+			r.Post("/item/webhook/update-all", handlers.UpdateAllItemWebhooks(plaidClient, pool))
+			r.Post("/plaid/transactions/recategorize", handlers.RecategorizeTransactions(plaidClient, pool))
 		})
 	})
 
