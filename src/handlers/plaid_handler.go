@@ -740,9 +740,13 @@ func UpdateAccountBalances(ctx context.Context, plaidClient *plaid.APIClient, po
 		var plaidCurrentStr, plaidAvailableStr string
 		if plaidAcc.Balances.Current.IsSet() {
 			plaidCurrentStr = strconv.FormatFloat(plaidAcc.Balances.GetCurrent(), 'f', 2, 64)
+		} else {
+			plaidCurrentStr = "0"
 		}
 		if plaidAcc.Balances.Available.IsSet() {
 			plaidAvailableStr = strconv.FormatFloat(plaidAcc.Balances.GetAvailable(), 'f', 2, 64)
+		} else {
+			plaidAvailableStr = "0"
 		}
 		needsUpdate := false
 		if dbAcc.CurrentBalance != plaidCurrentStr {

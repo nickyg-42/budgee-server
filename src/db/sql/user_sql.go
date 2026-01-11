@@ -120,10 +120,25 @@ func UpdateUserLastLogin(pool *pgxpool.Pool, userID int64) error {
 
 func DeleteUser(userID int, pool *pgxpool.Pool) error {
 	query := `
+		SELECT email FROM users
+		WHERE id = $1;
+	`
+	var email string
+	err := pool.QueryRow(
+		context.Background(),
+		query,
+		userID,
+	).Scan(&email)
+
+	if err != nil {
+		return fmt.Errorf("failed to get user email when deleting user: %w", err)
+	}
+
+	query = `
 		DELETE FROM users
 		WHERE id = $1;
 	`
-	_, err := pool.Exec(
+	_, err = pool.Exec(
 		context.Background(),
 		query,
 		userID,
@@ -131,6 +146,20 @@ func DeleteUser(userID int, pool *pgxpool.Pool) error {
 
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	query = `
+		DELETE FROM whitelisted_emails
+		WHERE email = $1;	
+	`
+	_, err = pool.Exec(
+		context.Background(),
+		query,
+		email,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to delete associated whitelisted user email: %w", err)
 	}
 
 	return nil

@@ -334,6 +334,18 @@ func SaveAccounts(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID 
 			ON CONFLICT DO NOTHING
 		`
 
+		var currentBalance, availableBalance float64
+		if acc.GetBalances().Current.IsSet() {
+			currentBalance = acc.Balances.GetCurrent() //acc.GetBalances().Current.Get()
+		} else {
+			currentBalance = 0
+		}
+		if acc.GetBalances().Available.IsSet() {
+			availableBalance = acc.Balances.GetAvailable()
+		} else {
+			availableBalance = 0
+		}
+
 		_, err := pool.Exec(ctx, query,
 			itemID,
 			acc.GetAccountId(),
@@ -342,8 +354,8 @@ func SaveAccounts(ctx context.Context, pool *pgxpool.Pool, userID int64, itemID 
 			acc.GetMask(),
 			acc.GetType(),
 			acc.GetSubtype(),
-			acc.GetBalances().Current.Get(),
-			acc.GetBalances().Available.Get(),
+			currentBalance,
+			availableBalance,
 		)
 		if err != nil {
 			return err
