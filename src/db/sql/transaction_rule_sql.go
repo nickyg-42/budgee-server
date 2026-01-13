@@ -1,6 +1,7 @@
 package db
 
 import (
+	"budgee-server/src/db"
 	"budgee-server/src/models"
 	"context"
 	"encoding/json"
@@ -178,6 +179,7 @@ func ApplyTransactionRulesToUser(ctx context.Context, pool *pgxpool.Pool, userID
 		for _, adj := range adjusted {
 			log.Printf("  Transaction ID %d: primary_category changed from '%s' to '%s'", adj.TxnID, adj.OldValue, adj.NewValue)
 		}
+		db.ClearAllTransactionCaches()
 	} else {
 		log.Printf("ApplyTransactionRulesToUser: No transactions adjusted by rules for user %d", userID)
 	}
