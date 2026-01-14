@@ -4,6 +4,7 @@ import (
 	db "budgee-server/src/db/sql"
 	"budgee-server/src/models"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -143,13 +144,19 @@ func DeleteTransactionRule(pool *pgxpool.Pool) http.HandlerFunc {
 func TriggerTransactionRules(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value("user_id").(int64)
-		err := db.ApplyTransactionRulesToUser(r.Context(), pool, int64(userID))
+		numAdjusted, err := db.ApplyTransactionRulesToUser(r.Context(), pool, int64(userID))
 		if err != nil {
 			log.Printf("ERROR: Failed to trigger transaction rules for user %d: %v", userID, err)
 			http.Error(w, "failed to trigger transaction rules", http.StatusInternalServerError)
 			return
 		}
+		err = db.RecategorizeTransactions(r.Context(), pool)
+		if err != nil {
+			log.Printf("ERROR: Failed to recategorize transactions after triggering rules for user %d: %v", userID, err)
+			http.Error(w, "failed to recategorize transactions", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "transaction rules triggered"})
+		json.NewEncoder(w).Encode(map[string]string{"message": "Transaction rules triggered", "num_adjusted": fmt.Sprintf("%d", numAdjusted)})
 	}
 }

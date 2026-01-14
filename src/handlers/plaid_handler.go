@@ -351,7 +351,7 @@ func SyncTransactionsForItem(ctx context.Context, pool *pgxpool.Pool, plaidClien
 		item.UserID, itemIDInt, len(allAdded), len(allModified), len(allRemoved))
 
 	// Apply transaction rules after syncing
-	err = db.ApplyTransactionRulesToUser(ctx, pool, item.UserID)
+	_, err = db.ApplyTransactionRulesToUser(ctx, pool, item.UserID)
 	if err != nil {
 		return err
 	}
@@ -703,7 +703,6 @@ func TriggerTransactionSyncFromWebhook(plaidClient *plaid.APIClient, pool *pgxpo
 	}
 }
 
-// UpdateAccountBalances syncs account balances from Plaid to DB for the given itemID
 func UpdateAccountBalances(ctx context.Context, plaidClient *plaid.APIClient, pool *pgxpool.Pool, itemID string) error {
 	// 1. Get all accounts for the itemID from the DB
 	dbAccounts, err := db.GetAccountsForItemSQL(ctx, pool, itemID)

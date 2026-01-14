@@ -95,13 +95,13 @@ func DeleteTransactionRule(ctx context.Context, pool *pgxpool.Pool, userID, rule
 	return nil
 }
 
-func ApplyTransactionRulesToUser(ctx context.Context, pool *pgxpool.Pool, userID int64) error {
+func ApplyTransactionRulesToUser(ctx context.Context, pool *pgxpool.Pool, userID int64) (int, error) {
 	rules, err := GetAllTransactionRules(ctx, pool, userID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch transaction rules: %w", err)
+		return 0, fmt.Errorf("failed to fetch transaction rules: %w", err)
 	}
 	if len(rules) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	// Fetch all transactions for the user (across all accounts)
@@ -114,7 +114,7 @@ func ApplyTransactionRulesToUser(ctx context.Context, pool *pgxpool.Pool, userID
     `
 	rows, err := pool.Query(ctx, query, userID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch transactions: %w", err)
+		return 0, fmt.Errorf("failed to fetch transactions: %w", err)
 	}
 	defer rows.Close()
 
@@ -132,7 +132,7 @@ func ApplyTransactionRulesToUser(ctx context.Context, pool *pgxpool.Pool, userID
 		var row txnRow
 		err := rows.Scan(&row.ID, &row.Name, &row.MerchantName, &row.Amount, &row.AccountName, &row.Category)
 		if err != nil {
-			return fmt.Errorf("failed to scan transaction: %w", err)
+			return 0, fmt.Errorf("failed to scan transaction: %w", err)
 		}
 		txns = append(txns, row)
 	}
@@ -161,7 +161,7 @@ func ApplyTransactionRulesToUser(ctx context.Context, pool *pgxpool.Pool, userID
 				if txn.Category == nil || *txn.Category != rule.PersonalFinanceCategory {
 					_, err := pool.Exec(ctx, "UPDATE transactions SET primary_category = $1, updated_at = NOW() WHERE id = $2", rule.PersonalFinanceCategory, txn.ID)
 					if err != nil {
-						return fmt.Errorf("failed to update transaction category: %w", err)
+						return 0, fmt.Errorf("failed to update transaction category: %w", err)
 					}
 					adjusted = append(adjusted, adjustment{
 						TxnID:    txn.ID,
@@ -184,7 +184,7 @@ func ApplyTransactionRulesToUser(ctx context.Context, pool *pgxpool.Pool, userID
 		log.Printf("ApplyTransactionRulesToUser: No transactions adjusted by rules for user %d", userID)
 	}
 
-	return nil
+	return len(adjusted), nil
 }
 
 func evaluateCondition(cond models.Condition, txn struct {
