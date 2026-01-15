@@ -572,6 +572,13 @@ func UpdateTransaction(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		err = db.RecategorizeTransaction(r.Context(), pool, transactionID, int(userID), int(accountID))
+		if err != nil {
+			log.Printf("ERROR: Failed to recategorize transaction after update - transaction_id: %d, user_id: %d: %v", transactionID, userID, err)
+			http.Error(w, "failed to recategorize transaction", http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": "transaction updated"})
 	}

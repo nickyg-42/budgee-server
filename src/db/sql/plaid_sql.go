@@ -486,6 +486,42 @@ func RecategorizeTransactions(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+// RecategorizeTransaction recalculates isExpense and isIncome for a single transaction and updates if needed.
+func RecategorizeTransaction(ctx context.Context, pool *pgxpool.Pool, transactionID int, userID int, accountID int) error {
+	query := `
+    	SELECT t.id, t.amount, t.primary_category, t.expense, t.income, a.type
+    	FROM transactions t
+    	JOIN accounts a ON t.account_id = a.id
+    	WHERE t.id = $1
+	`
+	var (
+		id              int
+		amount          float64
+		primaryCategory *string
+		expense         bool
+		income          bool
+		accountType     string
+	)
+	err := pool.QueryRow(ctx, query, transactionID).Scan(&id, &amount, &primaryCategory, &expense, &income, &accountType)
+	if err != nil {
+		return err
+	}
+	category := ""
+	if primaryCategory != nil {
+		category = *primaryCategory
+	}
+	isExpense := util.IsExpense(accountType, amount, category)
+	isIncome := util.IsIncome(accountType, amount, category)
+	if isExpense != expense || isIncome != income {
+		_, err := pool.Exec(ctx, "UPDATE transactions SET expense = $1, income = $2 WHERE id = $3", isExpense, isIncome, id)
+		if err != nil {
+			return err
+		}
+		db.DelTransactionCache("transactions_account_user_" + fmt.Sprint(userID) + fmt.Sprint("_") + fmt.Sprint(accountID))
+	}
+	return nil
+}
+
 // Unused currently - add cache invalidation if ever used
 func InsertTransaction(ctx context.Context, pool *pgxpool.Pool, accountID int64, amount float64, date, name, merchantName, primaryCategory, detailedCategory, paymentChannel string, expense bool) (models.Transaction, error) {
 	insertQuery := `
