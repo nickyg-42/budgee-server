@@ -68,6 +68,36 @@ func GetUserByUsername(username string, pool *pgxpool.Pool) (*models.User, error
 	return &user, nil
 }
 
+func GetUserByEmail(email string, pool *pgxpool.Pool) (*models.User, error) {
+	var user models.User
+	query := `
+        SELECT id, username, email, first_name, last_name, password_hash, created_at, theme, super_admin, last_login, locked
+        FROM users 
+        WHERE email = $1
+    `
+	err := pool.QueryRow(context.Background(), query, email).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.FirstName,
+		&user.LastName,
+		&user.PasswordHash,
+		&user.CreatedAt,
+		&user.Theme,
+		&user.SuperAdmin,
+		&user.LastLogin,
+		&user.Locked,
+	)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, errors.New("user not found")
+		}
+		return nil, fmt.Errorf("query error: %w", err)
+	}
+	return &user, nil
+}
+
 func CreateUser(req models.RegisterRequest, hashedPassword string, pool *pgxpool.Pool) (*models.RegisterResponse, error) {
 	query := `
 		INSERT INTO users (first_name, last_name, username, email, password_hash, last_login)

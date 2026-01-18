@@ -117,8 +117,8 @@ func Login(pool *pgxpool.Pool) http.HandlerFunc {
 		enableCors(&w)
 
 		var credentials struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
+			UsernameOrEmail string `json:"username"`
+			Password        string `json:"password"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
@@ -127,22 +127,26 @@ func Login(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		user, err := db.GetUserByUsername(strings.ToLower(credentials.Username), pool)
+		user, err := db.GetUserByUsername(strings.ToLower(credentials.UsernameOrEmail), pool)
 		if err != nil {
-			log.Printf("ERROR: Failed to find user during login - Username: %s: %v", credentials.Username, err)
-			http.Error(w, "User not found", http.StatusUnauthorized)
-			return
+			user, err = db.GetUserByEmail(strings.ToLower(credentials.UsernameOrEmail), pool)
+
+			if err != nil {
+				log.Printf("ERROR: Failed to find user during login - Username/Email: %s: %v", credentials.UsernameOrEmail, err)
+				http.Error(w, "User not found", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		if user.Locked {
-			log.Printf("ERROR: Locked user attempted login - Username: %s", credentials.Username)
+			log.Printf("ERROR: Locked user attempted login - Username/Email: %s", credentials.UsernameOrEmail)
 			http.Error(w, "User account is locked", http.StatusForbidden)
 			return
 		}
 
 		if err := bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(credentials.Password)); err != nil {
-			log.Printf("ERROR: Invalid password attempt for user %s from IP %s",
-				credentials.Username, r.RemoteAddr)
+			log.Printf("ERROR: Invalid password attempt for username/email %s from IP %s",
+				credentials.UsernameOrEmail, r.RemoteAddr)
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
