@@ -14,11 +14,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-
+        
       - name: Set up Go environment
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.23.2'  # Specify the Go version you need
+          go-version: 1.23  # Specify the Go version you need
+        env:
+          GITHUB_ACTIONS_RUNNER_USE_IPV4: true
 
       - name: Build Go application
         run: |
