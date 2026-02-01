@@ -13,7 +13,6 @@ import (
 func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string, isDemo bool) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.CORSMiddleware)
-	r.Use(middleware.DemoModeMiddleware(isDemo))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -28,7 +27,7 @@ func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string
 		}
 
 		// Protected routes
-		r.With(middleware.JWTAuthMiddleware(pool)).Group(func(r chi.Router) {
+		r.With(middleware.JWTAuthMiddleware(pool), middleware.DemoModeMiddleware(isDemo)).Group(func(r chi.Router) {
 			// User
 			r.Get("/user/{user_id}", handlers.GetUser(pool))
 			r.Put("/user", handlers.UpdateUser(pool))
