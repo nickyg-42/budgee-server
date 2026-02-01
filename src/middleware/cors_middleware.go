@@ -7,8 +7,10 @@ import (
 func CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		allowedOrigins := map[string]bool{
-			"https://budgeeapp.com":     true,
-			"https://www.budgeeapp.com": true,
+			"https://budgeeapp.com":          true,
+			"https://www.budgeeapp.com":      true,
+			"https://demo.budgeeapp.com":     true,
+			"https://www.demo.budgeeapp.com": true,
 		}
 		origin := r.Header.Get("Origin")
 		if allowedOrigins[origin] {

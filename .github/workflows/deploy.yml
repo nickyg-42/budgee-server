@@ -1,15 +1,15 @@
-name: Deploy Go Application to Raspberry Pi
+name: Deploy Go Application to server
 
 on:
   push:
     branches:
-      - main  # Trigger deploy on push to the main branch
+      - main
     paths-ignore:
       - '**/README.md'
 
 jobs:
   build-and-deploy:
-    runs-on: self-hosted  # This uses your self-hosted runner
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repository
@@ -18,7 +18,7 @@ jobs:
       - name: Set up Go environment
         uses: actions/setup-go@v5
         with:
-          go-version: 1.23  # Specify the Go version you need
+          go-version: 1.23
         env:
           GITHUB_ACTIONS_RUNNER_USE_IPV4: true
 
@@ -29,20 +29,27 @@ jobs:
       - name: Stop budgee-api service
         run: |
           sudo systemctl stop budgee-api
+          sudo systemctl stop budgee-demo-api
         
       - name: Run database migrations
-        run: migrate -path src/db/migrations -database "$PROD_DATABASE_URL" up
+        run: | 
+          migrate -path src/db/migrations -database "$PROD_DATABASE_URL" up
+          migrate -path src/db/migrations -database "$DEMO_DATABASE_URL" up
         env:
             PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+            DEMO_DATABASE_URL: ${{ secrets.DEMO_DATABASE_URL }}
 
       - name: Copy Binary to user bin
         run: |
           sudo cp budgee-api /usr/local/bin/budgee-api
+          sudo cp budgee-api /usr/local/bin/budgee-demo-api
 
       - name: Start budgee-api service
         run: |
           sudo systemctl start budgee-api
+          sudo systemctl start budgee-demo-api
 
       - name: Verify budgee-api service status
         run: |
           sudo systemctl status budgee-api --no-pager
+          sudo systemctl status budgee-demo-api --no-pager

@@ -10,9 +10,10 @@ import (
 	"github.com/plaid/plaid-go/v41/plaid"
 )
 
-func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string) *chi.Mux {
+func NewRouter(pool *pgxpool.Pool, plaidClient *plaid.APIClient, plaidEnv string, isDemo bool) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.CORSMiddleware)
+	r.Use(middleware.DemoModeMiddleware(isDemo))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))

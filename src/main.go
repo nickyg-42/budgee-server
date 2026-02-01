@@ -37,7 +37,7 @@ func main() {
 	plaidClient := plaidclient.NewPlaidClient(cfg.PlaidClientID, cfg.PlaidSecret, cfg.PlaidEnvironment)
 
 	// Router
-	router := api.NewRouter(pool, plaidClient, cfg.PlaidEnvironment)
+	router := api.NewRouter(pool, plaidClient, cfg.PlaidEnvironment, cfg.IsDemo)
 
 	log.Println("API server running on port", cfg.Port)
 	if err := http.ListenAndServe("127.0.0.1:"+cfg.Port, router); err != nil {

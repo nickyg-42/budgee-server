@@ -13,6 +13,7 @@ type Config struct {
 	PlaidClientID    string
 	PlaidSecret      string
 	PlaidEnvironment string
+	IsDemo           bool
 }
 
 func Load() Config {
@@ -25,6 +26,7 @@ func Load() Config {
 		PlaidClientID:    getEnv("PLAID_CLIENT_ID", ""),
 		PlaidSecret:      getEnv("PLAID_SECRET", ""),
 		PlaidEnvironment: getEnv("PLAID_ENVIRONMENT", "sandbox"),
+		IsDemo:           getEnv("IS_DEMO", "false") == "true",
 	}
 
 	if cfg.DatabaseURL == "" {
